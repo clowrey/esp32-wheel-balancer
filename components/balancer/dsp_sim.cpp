@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace balancer {
+namespace bal {
 
 RevSim::RevSim() : rng_(42) {
   // Same rotor as the host simulation test (g per g*mm at 1500 rpm).
@@ -64,4 +64,4 @@ int RevSim::step(double dt, RevResult *out, int max) {
   return n;
 }
 
-}  // namespace balancer
+}  // namespace bal

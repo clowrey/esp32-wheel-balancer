@@ -19,7 +19,7 @@ struct i2s_channel_obj_t;
 struct mcpwm_cap_timer_t;
 struct mcpwm_cap_channel_t;
 
-namespace balancer {
+namespace bal {
 
 struct AcqConfig {
   int i2s_port = 1;
@@ -108,6 +108,6 @@ class Acquisition {
   uint32_t stat_frames_ = 0;
 };
 
-}  // namespace balancer
+}  // namespace bal
 
 #endif  // USE_ESP32

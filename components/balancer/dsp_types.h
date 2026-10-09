@@ -15,7 +15,7 @@
 #include <complex>
 #include <cstdint>
 
-namespace balancer {
+namespace bal {
 
 using cplx = std::complex<double>;
 using cplxf = std::complex<float>;
@@ -68,4 +68,4 @@ inline cplx convert_accel(cplx accel_g, Quantity q, int order, double omega) {
   return -accel_g * (a_si * 1e6 / (w * w));  // displacement, um
 }
 
-}  // namespace balancer
+}  // namespace bal

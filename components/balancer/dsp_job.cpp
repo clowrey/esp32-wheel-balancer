@@ -4,7 +4,7 @@
 #include <cstdarg>
 #include <cstdio>
 
-namespace balancer {
+namespace bal {
 
 namespace {
 std::string fmt(const char *f, ...) __attribute__((format(printf, 1, 2)));
@@ -83,7 +83,7 @@ std::string BalanceJob::instruction() const {
 
   auto trial_txt = [&](int p) {
     const PlaneSetup &ps = cfg_.plane[p];
-    return fmt("Fit %.2f g at %.0f deg on plane %d (radius %.0f mm).", ps.trial_mass_g,
+    return fmt("Fit %.2f g at %.0f° on plane %d (radius %.0f mm).", ps.trial_mass_g,
                wrap360(ps.trial_angle_deg), p + 1, ps.trial_radius_mm);
   };
 
@@ -230,4 +230,4 @@ bool BalanceJob::compute_(std::string *error) {
   return true;
 }
 
-}  // namespace balancer
+}  // namespace bal

@@ -18,9 +18,9 @@
 
 namespace sim {
 
-using balancer::cplx;
+using bal::cplx;
 
-inline double rpm_ref_to_w(double rpm) { return rpm * balancer::kTwoPi / 60.0; }
+inline double rpm_ref_to_w(double rpm) { return rpm * bal::kTwoPi / 60.0; }
 
 struct RotorModel {
   double fs = 16000.0;
@@ -80,8 +80,8 @@ inline void run_coastdowns(const RotorModel &m, const cplx *u_extra, int passes,
           const cplx r = resp[s] * scale;
           // lag-complex L = A e^{j lag} -> x = A cos(theta - lag)
           double x = std::abs(r) * std::cos(th - std::arg(r));
-          x += m.second_order_frac * std::abs(r) * std::cos(2 * th - ph2[s] / balancer::kDegPerRad);
-          x += m.nonsync_g * std::cos(balancer::kTwoPi * m.nonsync_hz * tabs + s);
+          x += m.second_order_frac * std::abs(r) * std::cos(2 * th - ph2[s] / bal::kDegPerRad);
+          x += m.nonsync_g * std::cos(bal::kTwoPi * m.nonsync_hz * tabs + s);
           x += m.noise_g_rms * gauss(rng);
           (s == 0 ? b0 : b1)[k] = static_cast<float>(x);
         }
@@ -94,7 +94,7 @@ inline void run_coastdowns(const RotorModel &m, const cplx *u_extra, int passes,
             const double idx = static_cast<double>(n + i + k) + frac + m.tach_jitter_s * m.fs * gauss(rng);
             tachs.push_back(idx);
           }
-          next_tach_theta += balancer::kTwoPi;
+          next_tach_theta += bal::kTwoPi;
         }
       }
       on_samples(b0.data(), b1.data(), cnt);
@@ -104,7 +104,7 @@ inline void run_coastdowns(const RotorModel &m, const cplx *u_extra, int passes,
     n += pass_samples;
     // Between passes the rotor is "spun back up": restart the angle cleanly
     // on a whole revolution so the tach sequence stays consistent.
-    theta_base = std::ceil(theta_at(t_pass) / balancer::kTwoPi) * balancer::kTwoPi;
+    theta_base = std::ceil(theta_at(t_pass) / bal::kTwoPi) * bal::kTwoPi;
     next_tach_theta = theta_base;
   }
 }

@@ -11,7 +11,7 @@
 #include "dsp_revolution.h"
 #include "sim_rotor.h"
 
-using namespace balancer;
+using namespace bal;
 
 namespace {
 

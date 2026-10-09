@@ -11,7 +11,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-namespace balancer {
+namespace bal {
 
 static const char *const TAG = "balancer.acq";
 
@@ -301,6 +301,6 @@ void Acquisition::task_() {
   }
 }
 
-}  // namespace balancer
+}  // namespace bal
 
 #endif  // USE_ESP32

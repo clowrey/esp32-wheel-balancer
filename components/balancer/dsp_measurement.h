@@ -13,7 +13,7 @@
 #include "dsp_revolution.h"
 #include "dsp_types.h"
 
-namespace balancer {
+namespace bal {
 
 struct MeasureConfig {
   double target_rpm = 0;            // 0 = not locked yet (nothing is accepted)
@@ -92,4 +92,4 @@ class Measurement {
   uint32_t rejected_[6];
 };
 
-}  // namespace balancer
+}  // namespace bal

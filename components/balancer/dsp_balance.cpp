@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace balancer {
+namespace bal {
 
 namespace {
 
@@ -226,4 +226,4 @@ double suggest_trial_gmm(double rotor_mass_kg, double test_rpm, double fraction)
   return u_kg_m * 1e6;  // kg*m -> g*mm
 }
 
-}  // namespace balancer
+}  // namespace bal

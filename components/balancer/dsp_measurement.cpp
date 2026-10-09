@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace balancer {
+namespace bal {
 
 double default_amp_floor(Quantity q) {
   switch (q) {
@@ -177,4 +177,4 @@ MeasureStats Measurement::stats() const {
   return s;
 }
 
-}  // namespace balancer
+}  // namespace bal

@@ -12,7 +12,7 @@
 
 #include "dsp_balance.h"
 
-using namespace balancer;
+using namespace bal;
 
 int main(int argc, char **argv) {
   if (argc != 17) {

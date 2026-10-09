@@ -12,7 +12,7 @@
 
 #include <cstdint>
 
-namespace balancer {
+namespace bal {
 
 class TachTimebase {
  public:
@@ -58,4 +58,4 @@ class TachTimebase {
   uint32_t dropped_tach_ = 0;
 };
 
-}  // namespace balancer
+}  // namespace bal

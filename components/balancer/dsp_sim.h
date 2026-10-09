@@ -10,7 +10,7 @@
 #include "dsp_revolution.h"
 #include "dsp_types.h"
 
-namespace balancer {
+namespace bal {
 
 class RevSim {
  public:
@@ -44,4 +44,4 @@ class RevSim {
   cplx fitted_[2];
 };
 
-}  // namespace balancer
+}  // namespace bal

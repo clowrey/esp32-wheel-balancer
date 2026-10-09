@@ -14,7 +14,7 @@
 
 #include "dsp_types.h"
 
-namespace balancer {
+namespace bal {
 
 struct RevolutionConfig {
   double fs = 16000.0;        // sample rate, Hz
@@ -71,4 +71,4 @@ class RevolutionAnalyzer {
   uint32_t gaps_ = 0;
 };
 
-}  // namespace balancer
+}  // namespace bal

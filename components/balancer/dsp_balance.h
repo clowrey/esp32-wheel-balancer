@@ -6,7 +6,7 @@
 
 #include "dsp_types.h"
 
-namespace balancer {
+namespace bal {
 
 constexpr int kMaxSensors = 4;
 constexpr int kMaxPlanes = 4;
@@ -87,4 +87,4 @@ double iso_uper_gmm(double grade_mm_s, double rotor_mass_kg, double service_rpm)
 // `fraction` of the rotor weight. Divide by the trial radius for grams.
 double suggest_trial_gmm(double rotor_mass_kg, double test_rpm, double fraction = 0.1);
 
-}  // namespace balancer
+}  // namespace bal

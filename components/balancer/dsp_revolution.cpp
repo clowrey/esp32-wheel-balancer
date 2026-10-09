@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace balancer {
+namespace bal {
 
 RevolutionAnalyzer::RevolutionAnalyzer(const RevolutionConfig &cfg) { configure(cfg); }
 
@@ -168,4 +168,4 @@ bool RevolutionAnalyzer::analyze_(double t0, double t1, RevResult &out) {
   return true;
 }
 
-}  // namespace balancer
+}  // namespace bal

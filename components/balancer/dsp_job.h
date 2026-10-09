@@ -10,7 +10,7 @@
 #include "dsp_measurement.h"
 #include "dsp_types.h"
 
-namespace balancer {
+namespace bal {
 
 struct PlaneSetup {
   double trial_mass_g = 3.5;
@@ -126,4 +126,4 @@ class BalanceJob {
   JobResult result_;
 };
 
-}  // namespace balancer
+}  // namespace bal

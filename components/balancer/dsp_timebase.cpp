@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 
-namespace balancer {
+namespace bal {
 
 void TachTimebase::configure(double timer_hz, double sample_rate, uint32_t prescale) {
   timer_hz_ = timer_hz;
@@ -132,4 +132,4 @@ bool TachTimebase::pop_tach(double &frame_index) {
   return true;
 }
 
-}  // namespace balancer
+}  // namespace bal

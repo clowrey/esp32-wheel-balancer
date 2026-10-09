@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   host-tests:
     runs-on: ubuntu-latest
@@ -20,12 +23,35 @@ jobs:
           pip install pyPRB
           python3 tools/crosscheck_pyprb.py build/tests/balance_cli 300
 
+  ui-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch LVGL 9.5.0 (same version as ESPHome 2026.9)
+        run: git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git /tmp/lvgl
+      - name: Render every screen with the demo rotor
+        run: |
+          cmake -S tools/ui_preview -B build/ui -DLVGL_DIR=/tmp/lvgl
+          cmake --build build/ui -j
+          mkdir -p shots
+          ./build/ui/ui_preview shots
+          pip install pillow
+          python3 -c "import glob; from PIL import Image; [Image.open(p).save(p[:-4]+'.png') for p in glob.glob('shots/*.ppm')]"
+          rm shots/*.ppm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: shots/
+
   firmware:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        config: [ci/bringup.yaml, balancer-jc1060p470.yaml]
+        include:
+          - {config: balancer-jc1060p470.yaml, name: balancer}
+          - {config: balancer-demo.yaml, name: balancer-demo}
+          - {config: ci/bringup.yaml, name: bringup}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,21 +65,41 @@ jobs:
       - name: Install ESPHome
         run: pip install esphome==2026.9.1
       - name: Compile
-        if: hashFiles(matrix.config) != ''
         run: |
           cp ci/secrets.yaml secrets.yaml
-          cp ci/secrets.yaml ci/secrets.yaml.bak 2>/dev/null || true
-          esphome compile ${{ matrix.config }}
+          set +e
+          esphome compile ${{ matrix.config }} 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            # Surface compiler errors as annotations (readable through the API).
+            grep -E "error:|Error |undefined reference|ERROR" build.log | head -40 > errors.txt
+            python3 - <<'PY'
+          import pathlib
+          lines = pathlib.Path("errors.txt").read_text(errors="replace").splitlines()
+          for chunk in [lines[i:i + 8] for i in range(0, len(lines), 8)][:6]:
+              msg = "%0A".join(l.replace("%", "%25").replace("::", ": :")[:400] for l in chunk)
+              print(f"::error title=compile::{msg}")
+          PY
+          fi
+          exit $status
       - name: Collect firmware
-        if: hashFiles(matrix.config) != ''
         run: |
           mkdir -p out
           find . -path '*/.esphome/build/*/.pioenvs/*/firmware*.bin' -o -path '*/.esphome/build/*/build/*.bin' | head -20
           find . -name 'firmware.factory.bin' -o -name 'firmware.ota.bin' | xargs -I{} cp {} out/ || true
           ls -la out
       - uses: actions/upload-artifact@v4
-        if: hashFiles(matrix.config) != ''
         with:
-          name: firmware-${{ strategy.job-index }}
+          name: firmware-${{ matrix.name }}
           path: out/
           if-no-files-found: warn
+      - name: Publish to the 'latest' pre-release (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --prerelease --title "Latest build" --notes "Built automatically from main."
+          for f in out/*.bin; do
+            cp "$f" "${{ matrix.name }}.$(basename "$f" | sed 's/^firmware\.//')"
+            gh release upload latest "${{ matrix.name }}.$(basename "$f" | sed 's/^firmware\.//')" --clobber
+          done
