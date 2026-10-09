@@ -1,0 +1,13 @@
+# ESPHome
+/.esphome/
+/secrets.yaml
+__pycache__/
+*.pyc
+
+# Host test builds
+/build/
+
+# Editors / OS
+.vscode/*
+!.vscode/tasks.json
+.DS_Store

@@ -1,0 +1,87 @@
+# Hardware config for Guition JC1060P470C (ESP32-P4, 1024x600 MIPI DSI)
+# Taken from clowrey/CellKeeper-BMS-LCD (hardware_guition_jc1060p470-serial.yaml),
+# with the BMS UART removed. Logger goes to USB-serial-JTAG.
+# Pin reference: docs/hardware/pinout.md
+
+esp32:
+  board: esp32-p4-evboard
+  variant: esp32p4
+  flash_size: 16MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_SPIRAM_XIP_FROM_PSRAM: y
+
+esp_ldo:
+  - channel: 3
+    id: dsi_phy_enable
+    voltage: 2.5V
+    adjustable: True
+  - channel: 4
+    id: sd_card_power
+    voltage: 2.7V
+    adjustable: True
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+esp32_hosted:
+  variant: ESP32C6
+  reset_pin: GPIO54
+  clk_pin: GPIO18
+  cmd_pin: GPIO19
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  active_high: true
+
+logger:
+  baud_rate: 115200
+  hardware_uart: USB_SERIAL_JTAG
+  level: DEBUG
+
+i2c:
+  - id: bus_a
+    sda: GPIO7
+    scl: GPIO8
+    scan: true
+    frequency: 400kHz
+
+display:
+  - platform: mipi_dsi
+    model: JC1060P470
+    id: my_display
+    reset_pin:
+      number: GPIO05   # TODO(Phase 0): schematic shows LCD_RST on GPIO0; confirm
+    update_interval: never
+    hsync_pulse_width: 20
+
+touchscreen:
+  - platform: gt911
+    id: my_touchscreen
+    i2c_id: bus_a
+    interrupt_pin: GPIO21
+
+output:
+  - id: gpio_backlight_pwm
+    platform: ledc
+    pin: GPIO23
+
+light:
+  - platform: monochromatic
+    output: gpio_backlight_pwm
+    name: Display Backlight
+    id: display_backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+    gamma_correct: 1.0
+
+switch:
+  - platform: gpio
+    pin: GPIO11
+    name: "Audio Amplifier"
+    id: audio_amplifier
+    restore_mode: ALWAYS_OFF
