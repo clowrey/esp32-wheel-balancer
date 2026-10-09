@@ -311,39 +311,45 @@ Wireframes go in `docs/ui/` (Phase 3).
 
 ---
 
-## 8. Repository layout (target)
+## 8. Repository layout
+
+ESPHome only copies top-level files of an external component, so the
+component is flat, with prefixes instead of subdirectories.
 
 ```
 p4-balancer/
-├── balancer-jc1060p470.yaml            # device entry (name, wifi, packages)
+├── balancer-jc1060p470.yaml            # device: real sensors
+├── balancer-demo.yaml                  # device: simulated rotor (no front end)
 ├── hardware_guition_jc1060p470.yaml    # board config from CellKeeper
-├── balancer_core.yaml                  # balancer: component config, sensors
-├── ui_1024x600.yaml                    # LVGL pages
 ├── components/balancer/
-│   ├── __init__.py                     # ESPHome config schema + codegen
-│   ├── balancer.h / balancer.cpp       # ESPHome Component glue
-│   ├── acq/                            # IDF-only: i2s_adc, tach_capture, timebase
-│   ├── dsp/                            # pure C++: tsa, orders, balance, iso
-│   └── ui/                             # C++ dial drawing, wizard state machine
-├── tests/                              # host unit tests (CMake + doctest)
-│   └── sim/                            # Python synthetic-signal generator
-├── tools/                              # CSV export parser, pyPRB cross-check
-└── docs/
-    ├── hardware/  (front-end.md, pinout, schematic, KiCad later)
-    ├── ui/        (wireframes)
-    └── legacy/    (original BMI160 sketch + analysis)
+│   ├── __init__.py                     # YAML schema, codegen, LVGL widget/font registration
+│   ├── balancer.{h,cpp}                # ESPHome glue: acquisition, NVS, sensors
+│   ├── acq_capture.{h,cpp}             # ESP-IDF: I2S1 + MCPWM capture task
+│   ├── dsp_types.h                     # conventions (lag-complex vectors, g*mm weights)
+│   ├── dsp_revolution.{h,cpp}          # per-revolution DFT of orders 1-10
+│   ├── dsp_measurement.{h,cpp}         # speed window / coast-down accumulator
+│   ├── dsp_balance.{h,cpp}             # influence coefficients, split, drill, ISO
+│   ├── dsp_job.{h,cpp}                 # wizard state and arithmetic
+│   ├── dsp_timebase.{h,cpp}            # tach ticks -> fractional sample index
+│   ├── dsp_sim.{h,cpp}                 # revolution-level demo rotor
+│   ├── ui_model.h, ui_core.{h,cpp}     # what the UI needs + shared implementation
+│   └── ui.{h,cpp}                      # LVGL 9 screens, dials, polar plots
+├── tests/                              # doctest host suite + sample-level rotor simulator
+├── tools/                              # balance_cli, pyPRB cross-check, ui_preview
+├── ci/                                 # CI secrets stub, bring-up config
+└── docs/  (hardware/, ui/ screenshots, legacy/, research/)
 ```
 
 ---
 
 ## 9. Phases
 
-### Phase 0 — Board bring-up (½ day)
+### Phase 0 — Board bring-up (½ day)  — config builds in CI; bench check pending
 - Copy the hardware YAML from CellKeeper and build a "hello" page.
 - Confirm GPIO5's role on this revision.
 - Confirm JP1 pin access and the 3V3 / VOUT-BAT levels.
 
-### Phase 1 — Acquisition (2–3 days)
+### Phase 1 — Acquisition (2–3 days)  — written, timebase host-tested; bench test pending
 - `i2s_adc`: I2S1 master, 16 kHz, 24-bit (32-bit slots), DMA, stereo.
   Start with a PCM1808 breakout board and a signal generator.
 - `tach_capture`: MCPWM capture for tach and LRCK (prescale 256), fractional
@@ -354,7 +360,7 @@ p4-balancer/
   derived from the same generator as the tach. Phase between channels
   < 0.1°, phase vs tach stable < 0.2° over 10 min.
 
-### Phase 2 — DSP and math, host-first (2–3 days, parallel with Phase 1)
+### Phase 2 — DSP and math, host-first (2–3 days, parallel with Phase 1)  — DONE
 - `dsp/` with doctest unit tests: TSA, order extraction, single- and
   two-plane solvers, split and combine, ISO calculation.
 - Python simulator: rotor with known unbalance plus noise and speed jitter
@@ -362,12 +368,14 @@ p4-balancer/
   injected unbalance.
 - Cross-check solver outputs against pyPRB and hsbalance.
 - **Exit test:** simulator recovers injected unbalance within 2% / 1° at
-  SNR 20 dB.
+  SNR 20 dB. **Result:** worst of 20 seeds 1.33% / 0.69° with three
+  coast-downs per run; pyPRB agreement 2e-8 over 300 random cases.
 
-### Phase 3 — UI (3–4 days)
+### Phase 3 — UI (3–4 days)  — DONE (screens in docs/ui; demo firmware)
 - Wireframes, then LVGL pages: home, setup, measure, result dial, live,
   settings.
-- Wizard state machine in C++ (`ui/wizard`), driving LVGL from the component.
+- Wizard state machine in C++ (`dsp_job`), UI in C++ against LVGL 9 (the
+  decision gate in §2 was taken: C++ UI inside the ESPHome component).
 - Dial rendering (canvas or custom draw) with weight markers and fixed
   positions.
 
@@ -378,7 +386,7 @@ p4-balancer/
 - Full two-plane procedure; verify the residual drops to the predicted level.
 - Repeatability: 5 runs with no changes, phase σ < 2°.
 
-### Phase 5 — Persistence and export (1–2 days)
+### Phase 5 — Persistence and export (1–2 days)  — settings, rotor setup and machine in NVS; HA sensors done; CSV export open
 - Machines and jobs in NVS (small) or SD (larger, CSV).
 - Web/HA export of run vectors; CSV download.
 

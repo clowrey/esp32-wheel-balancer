@@ -88,7 +88,7 @@ bool Acquisition::start(const AcqConfig &cfg) {
     return false;
   }
   status_.running.store(true);
-  xTaskCreatePinnedToCore(task_trampoline_, "balancer_acq", 8192, this, cfg_.task_priority, &task_,
+  xTaskCreatePinnedToCore(task_trampoline_, "balancer_acq", 8192, this, cfg_.task_priority, &task_handle_,
                           cfg_.task_core);
   ESP_LOGI(TAG, "acquisition running: fs=%u Hz, capture timer %u Hz", (unsigned) cfg_.sample_rate,
            (unsigned) cap_resolution_);

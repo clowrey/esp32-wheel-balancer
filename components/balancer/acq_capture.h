@@ -93,7 +93,7 @@ class Acquisition {
   RevolutionAnalyzer analyzer_;
   TachTimebase timebase_;
   QueueHandle_t rev_queue_ = nullptr;
-  TaskHandle_t task_ = nullptr;
+  TaskHandle_t task_handle_ = nullptr;
   i2s_channel_obj_t *rx_ = nullptr;
   mcpwm_cap_timer_t *cap_timer_ = nullptr;
   mcpwm_cap_channel_t *tach_chan_ = nullptr;

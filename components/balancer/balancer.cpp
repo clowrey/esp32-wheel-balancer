@@ -57,7 +57,7 @@ void BalancerComponent::setup() {
     acq_started_ = acq_.start(acq_cfg_);
     if (!acq_started_) {
       ESP_LOGE(TAG, "acquisition failed to start (check the I2S/tach pins)");
-      status_set_error("acquisition failed");
+      this->status_set_error(LOG_STR("acquisition failed"));
     }
   }
 #endif

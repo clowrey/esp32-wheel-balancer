@@ -13,13 +13,19 @@ measurements use the speed window and coast-down capture in PLAN §5.1.
   clowrey/CellKeeper-BMS-LCD, which runs on the same board.
 - Board config: `hardware_guition_jc1060p470.yaml` (known-good, from CellKeeper).
   Don't change display, touch, PSRAM or LDO settings without a reason.
-- UI: ESPHome LVGL YAML (`ui_1024x600.yaml`). Custom drawing (rotor dials)
-  is done in C++ inside the component.
+- UI: C++ against LVGL 9.5 (`ui.cpp`), talking only to `UiModel`
+  (`ui_model.h`). `ModelCore` (`ui_core.cpp`) is shared by the firmware and
+  `tools/ui_preview`, which renders every screen to PNG on a PC; check UI
+  changes there before pushing. New LVGL widgets or fonts must be added to
+  UI_WIDGETS / UI_FONTS in `__init__.py`.
+- Component files are flat (ESPHome ignores subdirectories of external
+  components): `dsp_*` pure C++, `acq_*` ESP-IDF, `ui*` LVGL, `balancer.*` glue.
+  DSP namespace is `bal` (not `balancer`, which is ESPHome's).
 
 ## Rules
-- `components/balancer/dsp/` is pure C++17: no ESPHome, IDF or LVGL headers.
+- `dsp_*` files are pure C++17: no ESPHome, IDF or LVGL headers.
   It must build and pass tests on the host (`tests/`, CMake + doctest).
-- Real-time acquisition (`acq/`) runs in its own FreeRTOS task pinned to
+- Real-time acquisition (`acq_capture`) runs in its own FreeRTOS task pinned to
   core 1. Never do I²S, MCPWM or DSP work in ESPHome `loop()`; hand results
   over through a queue or double buffer.
 - All timing is in sample-index units. Tach edges and LRCK edges are latched
@@ -33,6 +39,10 @@ measurements use the speed window and coast-down capture in PLAN §5.1.
   claiming DSP or solver changes work.
 
 ## Build
-- `esphome compile balancer-jc1060p470.yaml` (once the entry YAML exists)
+- Firmware: `esphome compile balancer-demo.yaml` / `balancer-jc1060p470.yaml`.
+  The cloud dev workspace cannot reach Espressif's download hosts, so
+  firmware is compiled by GitHub Actions; compile errors show up as check-run
+  annotations and binaries on the `latest` pre-release.
 - Host tests: `cmake -S tests -B build/tests && cmake --build build/tests && ctest --test-dir build/tests`
+- UI preview: `cmake -S tools/ui_preview -B build/ui -DLVGL_DIR=<lvgl v9.5.0> && cmake --build build/ui && build/ui/ui_preview <outdir>`
 - `secrets.yaml` is gitignored; copy `secrets.yaml.example`.
