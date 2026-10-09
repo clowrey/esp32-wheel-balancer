@@ -2,6 +2,10 @@
 
 Two-plane dynamic balancer on the Guition JC1060P470C (ESP32-P4, 7" LCD).
 Read `PLAN.md` first; it is the source of truth for architecture and phases.
+Decisions are in PLAN §0: 1 hp motor rotor default, 100 mV/g IEPE sensors,
+tach is a 3.3 V GPIO pulse from Chester's own sensor, ESPHome, and the rotor
+is spun with compressed air (no drive). Speed is unregulated, so
+measurements use the speed window and coast-down capture in PLAN §5.1.
 
 ## Stack
 - ESPHome (esp-idf framework) plus a local external component in

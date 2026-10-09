@@ -14,11 +14,11 @@ working CellKeeper-BMS-LCD ESPHome config.
 | 5 | GND | 6 | GND |
 | 7 | **GPIO1** — PCM1808 SCKI (MCLK) | 8 | NC |
 | 9 | **GPIO2** — PCM1808 BCK | 10 | GPIO47 — spare |
-| 11 | **GPIO3** — PCM1808 LRCK | 12 | GPIO46 — spare (motor en / beeper) |
+| 11 | **GPIO3** — PCM1808 LRCK | 12 | GPIO46 — spare |
 | 13 | **GPIO4** — PCM1808 DOUT | 14 | GPIO45 — spare (run/stop button) |
 | 15 | GPIO5 — avoid (LCD reset in CellKeeper YAML) | 16 | GND |
 | 17 | GPIO20 — spare | 18 | 3V3 |
-| 19 | **GPIO32** — tach in | 20 | C6_U0RXD |
+| 19 | **GPIO32** — tach in (3.3 V pulse) | 20 | C6_U0RXD |
 | 21 | GPIO33 — LRCK capture jumper (fallback) | 22 | C6_U0TXD |
 | 23 | ES_I2C_SDA (GPIO7) — ADS1115 | 24 | C6_IO9 |
 | 25 | ES_I2C_SCL (GPIO8) — ADS1115 | 26 | C6_CHIP_PU |

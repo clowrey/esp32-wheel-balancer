@@ -3,6 +3,7 @@
 Two-plane dynamic balancer on the Guition JC1060P470C (ESP32-P4, 7"
 1024×600 touchscreen). Two IEPE accelerometers and an optical tach in;
 "add 12.4 g at 137° on plane 1" out, drawn on rotor dials on the LCD.
+Default target: a 1 hp motor rotor on a stand, spun with compressed air.
 
 **Status:** planning. See [PLAN.md](PLAN.md).
 
@@ -12,7 +13,8 @@ Two-plane dynamic balancer on the Guition JC1060P470C (ESP32-P4, 7"
   instant.
 - MCPWM capture latches tach edges and LRCK edges in hardware, so every tach
   pulse is known to a fraction of a sample.
-- Time-synchronous averaging over whole revolutions, then the 1× vector per
+- Time-synchronous averaging over whole revolutions in a speed window, with
+  coast-down capture for the air-driven rotor, then the 1× vector per
   channel with a stability check.
 - Influence-coefficient solver (single and two plane, trim runs, weight
   splitting, ISO 21940-11 residual).

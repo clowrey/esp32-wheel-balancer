@@ -12,7 +12,7 @@ this on perfboard / breakouts; Phase 6 turns it into a KiCad board.
       │                            │
       │                         C_ac 10 µF film/X7R ─┬─ R_bias 330k → VREF(PCM1808 VCOM)
       │                                              │
-      │                                       gain stage (OPA1612/OPA2192, G set per sensor)
+      │                                       gain stage ×10 (OPA1612/OPA2192)
       │                                              │
       │                                        RC AA: 1k + 10 nF (≈16 kHz)
       │                                              │
@@ -33,14 +33,22 @@ this on perfboard / breakouts; Phase 6 turns it into a KiCad board.
 - **PCM1808 input:** about 0.6·VCC p-p full scale (≈3 Vpp at 5 V AVDD),
   single-ended, biased at VCOM.
 
-### Gain by sensor
+### Gain
+
+v1 sensors are **100 mV/g industrial IEPE** (PCB 603C01 class, to buy).
+Default gain is **×10**, giving about ±1.5 g full scale. A well-balanced 1 hp
+rotor on a stand at ~1500 RPM produces only tens of mg at 1×, so the extra
+gain matters more than headroom. Drop to ×3 (±5 g) if the air jet or a
+rough stand clips the input.
 
 | Sensor | Sensitivity | Gain | Full scale ≈ |
 |---|---|---|---|
-| PCB 603C01 / Dytran 3055 (100 mV/g) | 100 mV/g | ×3 | ±5 g |
-| Dytran 3115A (10.670 mV/g cal) | ~10.7 mV/g | ×20 | ±7 g |
+| PCB 603C01 / Dytran 3055 (default) | 100 mV/g | ×10 | ±1.5 g |
+| same, rough conditions | 100 mV/g | ×3 | ±5 g |
+| Dytran 3115A (on hand, 10.670 mV/g cal) | ~10.7 mV/g | ×20 | ±7 g |
 
-Gain and sensitivity are configuration values, not hard-coded.
+Gain and per-sensor sensitivity (from each sensor's cal sheet) are
+configuration values, not hard-coded.
 
 ## PCM1808 setup
 
@@ -54,9 +62,12 @@ Gain and sensitivity are configuration values, not hard-coded.
 
 ## Tach input
 
-- Optical reflective sensor or laser tach module (open-collector or 5 V push-pull).
-- 10k pull-up to 3V3, then a 74LVC1G17 Schmitt buffer into GPIO32. Add an
-  optocoupler option for long cables or noisy machines.
+Chester builds the laser/optical sensor. The firmware only needs a clean
+**3.3 V logic pulse, once per revolution, on GPIO32** (JP1 pin 19).
+
+- Edge (rising/falling), internal pull-up, and minimum pulse period
+  (glitch rejection) are YAML settings.
+- If the sensor runs at 5 V, level-shift or divide down before GPIO32.
 - Reflective tape mark = 0°. Rotation direction and angle convention are set
   in the UI.
 
@@ -69,7 +80,7 @@ Gain and sensitivity are configuration values, not hard-coded.
 | 1 | 5→24 V boost module | low-ripple, add LC filter |
 | 1 | OPA1612 or OPA2192 | dual low-noise op-amp for gain |
 | 1 | ADS1115 breakout | bias monitor on I²C bus_a, addr 0x48 |
-| 1 | 74LVC1G17 | tach Schmitt buffer |
 | 2 | BNC or MIL-C-5015 2-pin | sensor connectors |
-| 2 | IEPE accelerometers | 100 mV/g preferred; 3115A works with more gain |
-| 1 | Optical/laser tach + reflective tape | |
+| 2 | IEPE accelerometers, 100 mV/g (PCB 603C01 class) | to buy; keep the cal sheets |
+| 2 | Magnetic bases or 1/4-28 studs | stud mount preferred for repeatability |
+| 1 | Tach sensor + reflective tape | Chester's build; 3.3 V pulse to GPIO32 |

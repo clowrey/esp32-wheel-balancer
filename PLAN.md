@@ -13,6 +13,18 @@ this design is built to avoid.
 
 ---
 
+## 0. Decisions (2026-10-08)
+
+| Question | Decision | What it changes |
+|---|---|---|
+| Default rotor | **1 hp induction-motor rotor** (56/143T frame class), balanced on a stand | Setup defaults, ISO helper, trial-weight helper (§6.1) |
+| Sensors | **Buy 100 mV/g industrial IEPE** (PCB 603C01 class) | Front-end gain ×10, ±1.5 g full scale (§3.1) |
+| Tach | **Chester builds the laser/optical sensor**; firmware only needs a 3.3 V logic pulse on a GPIO | No Schmitt/opto on our side; GPIO32 input with configurable edge and glitch filter |
+| Framework | **ESPHome** + external C++ component | As in §2 |
+| Rotor drive | **None. Rotor is spun with compressed air.** No motor drive, no valve output | Speed is not regulated, so measurement uses a speed window and coast-down capture (§5.1) |
+
+---
+
 ## 1. Goals and non-goals
 
 **Goals**
@@ -36,7 +48,8 @@ this design is built to avoid.
 - More than 2 planes or more than 2 sensors (the math is written for M×N
   least-squares so this can come later).
 - Full vibration-analyzer features (envelope, bearing fault frequencies).
-- Driving the rotor motor (spare GPIOs are reserved for it).
+- Driving the rotor. It's spun with compressed air, so there's no motor drive
+  or air-valve output in v1.
 
 ---
 
@@ -71,14 +84,14 @@ Only worth it if ESPHome's LVGL becomes a blocker for the dial or wizard UI.
 ### 3.1 Signal chain (per channel ×2)
 
 ```
-IEPE accel ──► 4 mA CCS from +24 V ──► AC couple (≤0.1 Hz) ──► gain/atten ──► RC AA ──┐
- (100 mV/g preferred,                    LT3092 or CRD                                   │
-  Dytran 3115A works)                                                                     ▼
+IEPE accel ──► 4 mA CCS from +24 V ──► AC couple (≤0.1 Hz) ──► gain ×10 ──► RC AA ────┐
+ (100 mV/g, PCB 603C01 class)            LT3092 or CRD                                   │
+                                                                                          ▼
                                                               PCM1808 (stereo 24-bit ΔΣ, I²S)
                                                                      │  MCLK/BCK/LRCK from P4
                                                                      ▼
                                                           ESP32-P4 I2S1 (master) + DMA
-Optical/laser tach ──► 74LVC1G17 Schmitt ──► MCPWM capture (hardware timestamp)
+Tach (Chester's laser/optical, 3.3 V pulse) ──► GPIO32 ──► MCPWM capture (hardware timestamp)
 LRCK (loopback) ─────────────────────────► MCPWM capture ch2, prescale 256
 IEPE bias (DC, via divider) ─► ADS1115 on I²C bus_a ─► open/short sensor detection
 ```
@@ -97,11 +110,11 @@ YAML** (the schematic shows LCD_RST on GPIO0), so it is avoided here.
 | PCM1808 BCK | 2 | 9 | P4 is I²S master |
 | PCM1808 LRCK | 3 | 11 | also looped into MCPWM capture |
 | PCM1808 DOUT → P4 DIN | 4 | 13 | |
-| Tach input | 32 | 19 | MCPWM capture ch0, Schmitt-buffered |
+| Tach input | 32 | 19 | MCPWM capture ch0. 3.3 V logic pulse from the user-built sensor; edge and minimum period set in YAML |
 | LRCK capture (jumper) | 33 | 21 | fallback if internal loopback of GPIO3 doesn't work |
 | ADS1115 SDA / SCL | 7 / 8 | 23 / 25 | shared bus_a; 0x48 is free (GT911, ES8311, ES7210, RTC are elsewhere) |
 | Spare: run/stop button | 45 | 14 | |
-| Spare: motor enable / beeper | 46 | 12 | |
+| Spare | 46 | 12 | |
 | Spare | 20, 47 | 17, 10 | |
 
 All pins are set in YAML (`balancer:` config), so they can be moved without
@@ -171,6 +184,31 @@ dependencies, so it can be unit-tested on a PC.
    stable/accepted. A reading is accepted when RPM stays inside a band
    around the target and phase σ is below a threshold.
 
+### 5.1 Air-driven rotor: speed-window and coast-down capture
+
+With compressed air there's no speed control, so a reading can't wait for a
+steady speed. Instead the acquisition works per revolution:
+
+- Every revolution is resampled and its 1× vector computed on its own.
+  Only revolutions whose speed is inside the **target window**
+  (default ±3%) go into the average. Others are dropped.
+- **Coast-down capture (default mode):** spin the rotor above the window,
+  cut the air, and let it coast through the window. Revolutions in the
+  window are accumulated. If one pass doesn't give enough revolutions,
+  spin up and coast again; passes add up until the target count is reached
+  (default 60 revolutions) and phase σ is below threshold. Coasting also
+  removes the air jet's forces from the measurement.
+- **Steady mode:** hold the air steady and accumulate in the window, for
+  when the rotor holds speed well enough.
+- **Lock speed:** run 0 sets the window ("Use current speed" button, or
+  enter an RPM). Every later run in the job must use the same window,
+  because influence coefficients are only valid at one speed.
+- **Phase-vs-speed check:** within the window, fit the 1× phase against RPM.
+  A steep slope means the stand has a resonance near the test speed, so the
+  UI warns and suggests a different speed.
+- Revolutions where speed changes too fast within one turn (deceleration
+  above a set limit) are rejected.
+
 ---
 
 ## 6. Balancing math (`dsp/balance.*`)
@@ -186,6 +224,10 @@ dependencies, so it can be unit-tested on a PC.
 - **Combine** an existing correction weight with a new one (trim).
 - **Radius conversion:** if the correction radius differs from the trial
   radius, scale by r_trial/r_corr.
+- **Add or remove:** each plane can be set to *add mass* (weights or
+  balance lugs) or *remove mass* (drilling end rings, typical for motor
+  rotors). Remove mode shows the angle +180° and the mass to drill out,
+  with an optional drill-depth helper (drill diameter, material density).
 - **Checks:** warn if a trial weight changes amplitude by less than 30% or
   phase by less than 30° (rule of thumb). Warn if cond(A) is high.
   Report predicted residual vibration.
@@ -194,6 +236,33 @@ dependencies, so it can be unit-tested on a PC.
   predicted from the influence coefficients.
 
 Validate against `pyPRB` and `hsbalance` with the same inputs (see Phase 2).
+
+### 6.1 Defaults for a 1 hp motor rotor
+
+All of these are editable in setup; they are starting points, not
+measurements of Chester's rotor.
+
+| Setting | Default | Note |
+|---|---|---|
+| Rotor mass | 3.5 kg | Weigh the actual rotor |
+| Service speed (for ISO) | 1750 RPM | 4-pole 60 Hz; 3450 for 2-pole |
+| Balance grade | G2.5 | ISO 21940-11, motors ≥80 mm shaft height above 950 RPM (143T ≈ 89 mm) |
+| Test speed window | locked at run 0, ±3% | Air-driven; aim well clear of stand resonance |
+| Planes | 2 (both end rings) | Single-plane option for narrow rotors |
+| Correction radius | 40 mm | End-ring or lug radius; measure it |
+| Correction mode | Remove (drill) | Switchable per plane |
+
+With those defaults the ISO limit works out to U_per = 9549·2.5·3.5/1750
+≈ 48 g·mm in total, about 24 g·mm per plane, which is about 0.6 g at 40 mm.
+The ISO limit uses the **service** speed, not the air-driven test speed;
+for a rigid rotor the correction is still valid at service speed.
+
+**Trial-weight helper:** suggests a trial mass whose force at the test speed
+is about 5–10% of the rotor's weight:
+m_t·r = k·M·g/ω². For example, at 1500 RPM, 3.5 kg, k = 0.1 and r = 40 mm,
+that's about 3.5 g. The helper also checks the trial run's effect against
+the 30%/30° rule and asks for a bigger trial weight if the effect is too
+small.
 
 ---
 
@@ -207,9 +276,14 @@ status (OK / open / short from IEPE bias), job name.
 2. **Rotor setup (wizard step 0):** 1 or 2 planes; trial mass and radius per
    plane; correction radius; angle convention (with an illustration of the
    tach mark and rotation direction); fixed positions (none / N holes /
-   N blades); target RPM band; ISO grade and rotor mass (optional).
+   N blades); add/remove mode per plane; ISO grade, rotor mass and service
+   speed (defaults from §6.1); trial-weight helper. The test speed window
+   is set at run 0.
 3. **Measure run screen (reused for each run):**
-   - Instructions at top ("Run 1: add 5.0 g at 0° on Plane 1, spin up").
+   - Instructions at top ("Run 1: add 3.5 g at 0° on Plane 1, spin up with
+     air, then let it coast").
+   - Speed gauge with the target window highlighted, a revolutions-collected
+     counter, and the coast/steady mode toggle.
    - Two polar plots (A and B) showing the live 1× vector with a fading
      trail of recent readings.
    - Amplitude (mm/s) and phase per channel, σ shown.
@@ -298,8 +372,9 @@ p4-balancer/
   positions.
 
 ### Phase 4 — Integration on a real rotor (2 days)
-- Front-end built on perfboard or a breakout. Sensors on a test rig (fan or
-  grinder with a known added mass).
+- Front-end built on perfboard or a breakout. Test rig: a 1 hp motor rotor on
+  a stand, spun with compressed air, with Chester's tach sensor. Start with a
+  known added mass to check that the solver finds it.
 - Full two-plane procedure; verify the residual drops to the predicted level.
 - Repeatability: 5 runs with no changes, phase σ < 2°.
 
@@ -309,8 +384,8 @@ p4-balancer/
 
 ### Phase 6 — Front-end PCB (later)
 - KiCad board: 2× IEPE (24 V boost, LT3092 CCS, coupling, gain), PCM1808,
-  tach input with Schmitt and optional opto, ADS1115 bias monitor, JP1
-  header connector. BNC or MIL-C-5015 sensor connectors.
+  tach header (3.3 V, power out for Chester's sensor), ADS1115 bias
+  monitor, JP1 header connector. BNC or MIL-C-5015 sensor connectors.
 
 ---
 
@@ -323,14 +398,17 @@ p4-balancer/
 | ESPHome LVGL too limited for the dial or wizard | Draw in C++ from the component; plain IDF is the last resort |
 | PCM1808 minimum fs (16 kHz) is more than needed | It's fine — the P4 has plenty of headroom. Could decimate before TSA if CPU becomes tight. |
 | Noise or ground loops from sensor cables | IEPE is single-ended — keep one ground point, use case-isolated sensors or isolating studs |
-| Low SNR with 10 mV/g sensors | Gain stage; prefer 100 mV/g industrial sensors |
+| Air jet adds noise and forces while it's blowing | Coast-down capture is the default; TSA rejects anything not synchronous with rotation |
+| Stand resonance near the test speed makes phase speed-sensitive | Phase-vs-speed check in the window (§5.1); move the test speed |
+| Too few revolutions in the window on one coast-down | Passes accumulate; the window and revolution count are adjustable |
 | Board revision differences (I²C addresses differ between users) | Scan on boot and show on the debug page |
 
-**Questions for Chester**
-1. Target rotors: speed range and typical size/mass? (Sets the default fs,
-   averaging time and ISO helper defaults.)
-2. Which sensors for v1 — the Dytran 3115As you have, or buy 100 mV/g
-   units?
-3. Tach: laser/optical module you already have, or design one in?
-4. ESPHome (recommended) vs plain IDF — any preference?
-5. Should the board drive the rotor motor (spin up to target RPM)?
+**Still open**
+1. Balancing stand: soft-bearing (pendulum or spring supports, measure above
+   resonance) or hard-bearing (stiff supports, measure well below)? It
+   changes the test-speed advice and whether readings can be shown as
+   absolute unbalance in g·mm rather than only vibration.
+2. Rotor details: actual mass, end-ring radius, and whether it has balance
+   lugs or fan blades. Defaults in §6.1 assume drilling end rings.
+3. Tach sensor output: idle level and pulse width, so the edge and glitch
+   filter defaults match.
