@@ -316,3 +316,217 @@ TEST_CASE("simulated two-plane balance on an air-driven 1 hp rotor") {
   CHECK(rv.stats.ch[0].amp < 0.05 * r0.stats.ch[0].amp);
   CHECK(rv.stats.ch[1].amp < 0.05 * r0.stats.ch[1].amp);
 }
+
+// ---------------------------------------------------------------------------
+// Job / wizard logic
+
+#include "dsp_job.h"
+
+namespace {
+MeasureStats stats_of(const cplx *v, double rpm) {
+  MeasureStats s;
+  s.revs = 40;
+  s.rpm_mean = rpm;
+  s.ready = true;
+  for (int c = 0; c < kChannels; c++) s.ch[c].mean = v[c];
+  return s;
+}
+}  // namespace
+
+TEST_CASE("job walks the two-plane procedure and the verify run passes ISO") {
+  for (bool with_rot : {false, true}) {
+    for (bool remove : {true, false}) {
+      CAPTURE(with_rot);
+      CAPTURE(remove);
+      cplx A[2][2] = {{polar_deg(0.020, 40), polar_deg(0.006, 200)},
+                      {polar_deg(0.005, 170), polar_deg(0.018, 65)}};
+      cplx u0[2] = {unbalance(2.0, 40, 30), unbalance(3.0, 40, 250)};
+      auto reading = [&](const cplx *extra) {
+        static cplx v[2];
+        for (int s = 0; s < 2; s++)
+          v[s] = A[s][0] * (u0[0] + extra[0]) + A[s][1] * (u0[1] + extra[1]);
+        return v;
+      };
+      JobConfig cfg;
+      cfg.angles_with_rotation = with_rot;
+      cfg.plane[0].remove_mode = cfg.plane[1].remove_mode = remove;
+      cfg.plane[0].trial_angle_deg = 90;
+      cfg.plane[1].trial_angle_deg = 45;
+      BalanceJob job;
+      job.reset(cfg);
+      job.start();
+      CHECK(job.step() == JobStep::RUN0);
+      const cplx none[2] = {0, 0};
+      REQUIRE(job.record(stats_of(reading(none), 1502)));
+      CHECK(job.test_rpm() == doctest::Approx(1502));
+      CHECK(job.step() == JobStep::TRIAL1);
+      const cplx t1[2] = {job.trial_vector(0), 0};
+      REQUIRE(job.record(stats_of(reading(t1), 1502)));
+      CHECK(job.step() == JobStep::TRIAL2);
+      const cplx t2[2] = {0, job.trial_vector(1)};
+      REQUIRE(job.record(stats_of(reading(t2), 1502)));
+      REQUIRE(job.step() == JobStep::RESULT);
+      REQUIRE(job.result().ok);
+      CHECK(job.result().trial_check[0].ok);
+      CHECK(job.result().trial_check[1].ok);
+
+      // Fit what the screen says, the way an operator would.
+      cplx fitted[2];
+      for (int p = 0; p < 2; p++) {
+        const auto &m = job.result().plane[p].mass;
+        double ang = job.to_internal_angle(m.angle_deg);
+        if (m.remove) ang += 180.0;  // removing mass at a spot == adding opposite
+        fitted[p] = unbalance(m.mass_g, cfg.plane[p].corr_radius_mm, ang);
+        CHECK(std::abs(fitted[p] + u0[p]) < 1e-6);
+        if (remove) CHECK(job.result().plane[p].drill_depth_mm > 0);
+      }
+      job.begin_verify();
+      REQUIRE(job.record(stats_of(reading(fitted), 1502)));
+      CHECK(job.step() == JobStep::VERIFIED);
+      CHECK(job.result().have_residual);
+      CHECK(job.result().within_iso[0]);
+      CHECK(job.result().within_iso[1]);
+      CHECK(job.result().residual_gmm[0] < 1e-6);
+      CHECK(job.result().reduction_pct[0] > 99.9);
+    }
+  }
+}
+
+TEST_CASE("job: single plane, kept trial weight, split positions, instructions") {
+  cplx a[2] = {polar_deg(0.02, 75), polar_deg(0.01, 120)};
+  cplx u0 = unbalance(2.0, 40, 123);
+  JobConfig cfg;
+  cfg.planes = 1;
+  cfg.keep_last_trial = true;
+  cfg.plane[0].remove_mode = false;
+  cfg.plane[0].positions = 8;
+  BalanceJob job;
+  job.reset(cfg);
+  job.start();
+  CHECK(job.instruction().find("LOCK SPEED") != std::string::npos);
+  cplx v0[2] = {a[0] * u0, a[1] * u0};
+  REQUIRE(job.record(stats_of(v0, 1500)));
+  CHECK(job.instruction().find("1455-1545 rpm") != std::string::npos);
+  const cplx t = job.trial_vector(0);
+  cplx v1[2] = {a[0] * (u0 + t), a[1] * (u0 + t)};
+  REQUIRE(job.record(stats_of(v1, 1500)));
+  REQUIRE(job.step() == JobStep::RESULT);
+  const auto &pr = job.result().plane[0];
+  // With the trial weight left on, the added weight must cancel u0 + t.
+  CHECK(std::abs(pr.u + u0 + t) < 1e-6);
+  REQUIRE(pr.use_split);
+  const cplx sum = polar_deg(pr.split.mass_a, pr.split.angle_a) + polar_deg(pr.split.mass_b, pr.split.angle_b);
+  CHECK(std::abs(sum - polar_deg(pr.mass.mass_g, pr.mass.angle_deg)) < 1e-9);
+  CHECK(job.suggested_trial_g(0) == doctest::Approx(3.48).epsilon(0.01));
+}
+
+// ---------------------------------------------------------------------------
+// Tach timebase (LRCK capture + DMA soft catch)
+
+#include <algorithm>
+#include "dsp_timebase.h"
+
+TEST_CASE("timebase maps tach ticks to fractional frame indices across timer wrap") {
+ for (bool drop_lrck : {false, true}) {
+  CAPTURE(drop_lrck);
+  const double timer_hz = 80e6;
+  const double fs = 16000.0 * (1.0 + 37e-6);  // real crystal error
+  const double t0 = 0.0123;                   // I2S starts 12.3 ms after the timer
+  const uint32_t tick_offset = 0xFFFFFFFFu - 40000000u;  // wraps 0.5 s in
+  auto ticks_at = [&](double t) { return static_cast<uint32_t>(tick_offset + static_cast<uint64_t>(std::llround(t * timer_hz))); };
+
+  struct Ev { double t; int kind; uint32_t frames; };
+  std::vector<Ev> ev;
+  // LRCK rising edge is half a frame into its frame; the prescaler fires on
+  // the 256th edge, i.e. frames 255, 511, ...
+  for (int k = 0; k < 400; k++) {
+    const int frame = 255 + 256 * k;
+    if (drop_lrck && k % 37 == 20) continue;  // lost capture interrupt
+    ev.push_back({t0 + (frame + 0.5) / fs, 1, 0});
+  }
+  // DMA complete for every 256-frame buffer, 4-9 us late.
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<double> lat(4e-6, 9e-6), when(0.05, 6.0);
+  for (int m = 1; m < 400; m++) ev.push_back({t0 + 256.0 * m / fs + lat(rng), 2, static_cast<uint32_t>(256 * m)});
+  std::vector<double> tach_t;
+  for (int i = 0; i < 200; i++) tach_t.push_back(when(rng));
+  std::sort(tach_t.begin(), tach_t.end());
+  for (double t : tach_t) ev.push_back({t, 0, 0});
+  std::sort(ev.begin(), ev.end(), [](const Ev &a, const Ev &b) { return a.t < b.t; });
+
+  TachTimebase tb;
+  tb.configure(timer_hz, 16000.0, 256);
+  std::vector<double> got;
+  for (auto &e : ev) {
+    if (e.kind == 0) tb.on_tach(ticks_at(e.t));
+    if (e.kind == 1) tb.on_lrck(ticks_at(e.t));
+    if (e.kind == 2) tb.on_soft(ticks_at(e.t), e.frames);
+    double f;
+    while (tb.pop_tach(f)) got.push_back(f);
+  }
+  CHECK(tb.aligned());
+  CHECK(tb.realigns() == 0);
+  CHECK(tb.measured_fs() == doctest::Approx(fs).epsilon(1e-6));
+  // Every tach after alignment (~30 ms in) must land on the right frame.
+  int checked = 0;
+  double worst = 0;
+  for (double f : got) {
+    // find the matching true time
+    double best = 1e9;
+    for (double t : tach_t) best = std::min(best, std::fabs(f - (t - t0) * fs));
+    worst = std::max(worst, best);
+    checked++;
+  }
+  CHECK(checked >= 195);
+  INFO("worst frame error " << worst);
+  CHECK(worst < 0.01);
+ }
+}
+
+// ---------------------------------------------------------------------------
+// On-device demo simulator drives the full wizard end to end.
+
+#include "dsp_sim.h"
+
+TEST_CASE("demo simulator + job: coast-downs give a correction that works") {
+  RevSim sim;
+  JobConfig cfg;
+  BalanceJob job;
+  job.reset(cfg);
+  job.start();
+  MeasureConfig mc;
+  Measurement meas(mc);
+  RevResult buf[16];
+  auto run = [&](const cplx f1, const cplx f2) {
+    sim.set_fitted(f1, f2);
+    meas.reset();
+    if (job.test_rpm() > 0) meas.set_target_rpm(job.test_rpm());
+    for (int pass = 0; pass < 10 && !meas.stats().ready; pass++) {
+      sim.blast(1700);
+      while (sim.rpm() > 1300) {
+        const int n = sim.step(0.05, buf, 16);
+        for (int i = 0; i < n; i++) {
+          if (meas.config().target_rpm <= 0 && buf[i].rpm < 1520) meas.set_target_rpm(1500);  // "LOCK SPEED"
+          meas.add(buf[i]);
+        }
+      }
+    }
+    REQUIRE(meas.stats().ready);
+    REQUIRE(job.record(meas.stats()));
+  };
+  run(0, 0);
+  run(job.trial_vector(0), 0);
+  run(0, job.trial_vector(1));
+  REQUIRE(job.result().ok);
+  cplx fit[2];
+  for (int p = 0; p < 2; p++) {
+    const auto &m = job.result().plane[p].mass;
+    double ang = job.to_internal_angle(m.angle_deg) + (m.remove ? 180.0 : 0.0);
+    fit[p] = unbalance(m.mass_g, cfg.plane[p].corr_radius_mm, ang);
+    CHECK(std::abs(fit[p] + sim.u0[p]) / std::abs(sim.u0[p]) < 0.05);
+  }
+  job.begin_verify();
+  run(fit[0], fit[1]);
+  CHECK(job.result().within_iso[0]);
+  CHECK(job.result().within_iso[1]);
+}

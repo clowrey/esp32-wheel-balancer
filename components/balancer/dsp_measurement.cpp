@@ -6,6 +6,18 @@
 
 namespace balancer {
 
+double default_amp_floor(Quantity q) {
+  switch (q) {
+    case Quantity::ACCEL_G:
+      return 0.0003;
+    case Quantity::VELOCITY_MM_S:
+      return 0.02;
+    case Quantity::DISPLACEMENT_UM:
+      return 0.15;
+  }
+  return 0.02;
+}
+
 const char *rev_status_str(RevStatus s) {
   switch (s) {
     case RevStatus::ACCEPTED:
@@ -139,8 +151,7 @@ MeasureStats Measurement::stats() const {
       cs.std_error = std::numeric_limits<double>::infinity();
     }
     cs.phase_unc_deg = cs.amp > 0 ? std::atan2(cs.std_error, cs.amp) * kDegPerRad : 180.0;
-    cs.settled = (cs.phase_unc_deg <= cfg_.max_phase_unc_deg) ||
-                 (cs.amp + 2.0 * cs.std_error < cfg_.amp_floor);
+    cs.settled = (cs.phase_unc_deg <= cfg_.max_phase_unc_deg) || (cs.std_error <= cfg_.amp_floor);
     all_settled = all_settled && cs.settled;
 
     // Phase-vs-speed slope (deg per 1% speed). Only meaningful when the

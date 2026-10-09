@@ -22,7 +22,10 @@ struct MeasureConfig {
   int max_revs = 4000;              // stop accepting after this many
   double max_period_change = 0.01;  // reject revs whose period jumped more than this
   double max_phase_unc_deg = 2.0;   // 1x phase uncertainty needed for "ready"
-  double amp_floor = 0.02;          // channel counts as settled if its 1x is below this (units of quantity)
+  double amp_floor = 0.02;          // channel also counts as settled once its 1x vector is known to
+                                    // within this (standard error, units of quantity): a well balanced
+                                    // rotor has no meaningful phase
+
   int block_revs = 10;              // block size for the uncertainty estimate
   Quantity quantity = Quantity::VELOCITY_MM_S;
 };
@@ -37,6 +40,8 @@ enum class RevStatus : uint8_t {
 };
 
 const char *rev_status_str(RevStatus s);
+// Sensible amp_floor for each quantity (about 0.02 mm/s at 25 Hz).
+double default_amp_floor(Quantity q);
 
 struct ChannelStats {
   cplx mean{0, 0};          // 1x, lag-complex, in the configured quantity
@@ -47,7 +52,7 @@ struct ChannelStats {
   double std_error = 0;     // standard error of the mean vector (same units)
   double phase_unc_deg = 180;  // atan(std_error / amp)
   double phase_slope = 0;   // d(phase)/d(speed), degrees per 1% speed change (NaN if unknown)
-  bool settled = false;     // phase_unc ok, or amplitude below the floor
+  bool settled = false;     // phase_unc ok, or the vector is known to within amp_floor
   double order_amp[kMaxOrder] = {0};  // mean amplitude per order (for the spectrum)
 };
 

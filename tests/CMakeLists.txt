@@ -12,6 +12,9 @@ set(DSP_SOURCES
   ${COMP}/dsp_revolution.cpp
   ${COMP}/dsp_measurement.cpp
   ${COMP}/dsp_balance.cpp
+  ${COMP}/dsp_job.cpp
+  ${COMP}/dsp_timebase.cpp
+  ${COMP}/dsp_sim.cpp
 )
 
 add_library(balancer_dsp STATIC ${DSP_SOURCES})
