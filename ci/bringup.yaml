@@ -1,0 +1,12 @@
+# Phase 0 bring-up: board config only, one label on the screen.
+esphome:
+  name: p4-bringup
+packages:
+  hardware: !include ../hardware_guition_jc1060p470.yaml
+lvgl:
+  displays: my_display
+  touchscreens: my_touchscreen
+  widgets:
+    - label:
+        text: "p4-balancer bring-up"
+        align: CENTER

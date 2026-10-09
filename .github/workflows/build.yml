@@ -1,0 +1,59 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run DSP tests
+        run: |
+          cmake -S tests -B build/tests -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/tests -j
+          ctest --test-dir build/tests --output-on-failure
+      - name: Cross-check two-plane solver against pyPRB
+        run: |
+          pip install pyPRB
+          python3 tools/crosscheck_pyprb.py build/tests/balance_cli 300
+
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [ci/bringup.yaml, balancer-jc1060p470.yaml]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Cache ESPHome toolchains
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/esphome
+          key: esphome-2026.9.1-${{ runner.os }}
+      - name: Install ESPHome
+        run: pip install esphome==2026.9.1
+      - name: Compile
+        if: hashFiles(matrix.config) != ''
+        run: |
+          cp ci/secrets.yaml secrets.yaml
+          cp ci/secrets.yaml ci/secrets.yaml.bak 2>/dev/null || true
+          esphome compile ${{ matrix.config }}
+      - name: Collect firmware
+        if: hashFiles(matrix.config) != ''
+        run: |
+          mkdir -p out
+          find . -path '*/.esphome/build/*/.pioenvs/*/firmware*.bin' -o -path '*/.esphome/build/*/build/*.bin' | head -20
+          find . -name 'firmware.factory.bin' -o -name 'firmware.ota.bin' | xargs -I{} cp {} out/ || true
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        if: hashFiles(matrix.config) != ''
+        with:
+          name: firmware-${{ strategy.job-index }}
+          path: out/
+          if-no-files-found: warn
