@@ -59,7 +59,7 @@ lvgl:
 
 # See docs/hardware/pinout.md for the JP1 header.
 balancer:
-  id: bal
+  id: rotor_balancer
   simulate: ${simulate}
   i2s:
     mclk_pin: GPIO1

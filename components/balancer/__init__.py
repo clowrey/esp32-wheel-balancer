@@ -3,7 +3,7 @@
 Example:
 
 balancer:
-  id: bal
+  id: rotor_balancer
   i2s: {mclk_pin: GPIO1, bclk_pin: GPIO2, lrclk_pin: GPIO3, din_pin: GPIO4}
   tach: {pin: GPIO32, edge: RISING}
   channel_a: {sensitivity: 100, gain: 10}
