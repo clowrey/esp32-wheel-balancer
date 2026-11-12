@@ -10,7 +10,7 @@ free depth behind the raised back cover for the sensor and tach wiring.
 | File | What |
 |---|---|
 | `display_case.py` | The model. All dimensions are dataclass fields at the top. |
-| `display_case.step` / `.stl` | Default build: flush outline, 1 in. clearance, front lip. |
+| `display_case.step` | Default build: flush outline, 1 in. clearance, front lip, side tabs. |
 | `render_preview.py` | Writes `preview.png` (numpy z-buffer renderer, no OpenGL). |
 | `JC1060P470C_I_W_Y-structure-drawing.pdf` | Vendor structure drawing the dimensions come from. |
 
@@ -19,22 +19,26 @@ pip install build123d
 python display_case.py                      # flush with the glass (default)
 python display_case.py --overhang 6.35      # 1/4 in. bigger all round; lip then wraps the glass edge
 python display_case.py --clearance 30       # more room behind the bump-out
-python display_case.py --no-lip
+python display_case.py --no-lip --no-tabs
+python display_case.py --stl                # also write an STL
 python render_preview.py
 ```
 
 ## What the case has
 
-- Overall 181.80 x 113.72 x 42.1 mm with the default settings: 36.2 mm
-  behind the standoff plane plus a 5.9 mm lip forward of it.
-- Four corner bosses at 166.00 x 99.00 mm, tied into the corner walls. A 2.9 mm
-  through hole (clears M2 or M2.5) with a 5.6 mm counterbore from the back,
-  leaving a 4 mm floor. An M2 x 8 (or M2.5 x 8) screw from the back then has
-  about 4 mm in the standoff. A long screwdriver reaches down the counterbore.
+- Overall 211.80 x 113.72 x 40.4 mm with the default settings (181.80 wide
+  without the tabs): 36.2 mm behind the standoff plane plus a 4.2 mm lip
+  forward of it. Display plus case is 48.2 mm deep.
+- Four corner bosses at 166.00 x 99.00 mm, tied into the corner walls. A 2.4 mm
+  M2 through hole with a 4.6 mm counterbore from the back, leaving a 4 mm
+  floor. An M2 x 8 screw from the back then has about 4 mm in the standoff. A
+  long screwdriver reaches down the counterbore.
 - Front lip, 1.6 mm thick, that carries the wall forward from the standoff
-  plane to 0.8 mm short of the back of the glass, so the edge gap is closed.
-  With `--overhang` of 2 mm or more the lip instead wraps the glass edge and
-  ends flush with the front.
+  tops to 0.8 mm short of the back face of the plastic bezel, so the edge gap
+  is closed. With `--overhang` of 2 mm or more the lip instead wraps the bezel
+  and ends flush with the glass front.
+- Mounting tabs on the left and right: 5 mm thick, 15 mm out from the wall,
+  40 mm long, flush with the back face, each with a 4.5 mm hole (M4 / #8).
 - USB-C window (16.8 x 35.1 mm) in the back wall over the two USB-C ports, so
   a cable plugs straight in for flashing. The ports point out of the back, and
   a normal plug's overmold ends inside the case, so the cable leaves through
@@ -62,12 +66,12 @@ heights 113.72, 99.00 and 74.67 all check out within 0.03 mm at that scale).
 | Glass outline | 181.80 x 113.72 mm | printed; also on the spec sheet | good |
 | Glass corner radius | 4.57 mm | scaled | check |
 | Standoff spacing | 166.00 x 99.00 mm, centred | printed | good |
-| Standoff hole | Ø2.00 (4x) | printed; the drawn inner circle is 2.5 mm | **check M2 vs M2.5** |
 | Standoff OD | 5.5 mm | scaled | fine (case boss is 9 mm) |
-| Front of glass to standoff tops | 8.00 mm | printed (side view) | check |
-| Glass thickness at the edge | 1.32 mm | scaled (side view) | **check** (sets the lip) |
+| Standoff thread | M2 | Chester, on the unit | good |
+| Glass front to back face of bezel | 7 mm | Chester, on the unit | good |
+| Standoffs past the bezel | 5 mm (so 12 mm from the glass front) | Chester, on the unit; the drawing says 8.00 total | good |
 | Back cover (bump-out) | 124.66 x 74.67 mm, R5.2, centred | printed; radius scaled | good |
-| Bump-out height above standoff tops | 8.38 mm | printed | check |
+| Bump-out height above standoff tops | 8.38 mm | printed, but the drawing's other depth was off by 4 mm | **check** |
 | RJ45 sticks out past the cover | 4.00 mm | printed (17 x 16 mm, scaled) | clears easily |
 | USB-C pair | 6.8 x 25.1 mm box, 47.8 mm right of centre and 12.5 mm above it (from the back) | scaled | check |
 | JP1 header | 55.5 mm left of centre, vertically centred (from the back) | scaled | not critical |
@@ -82,13 +86,21 @@ slot depend on this; if the window lands on the wrong half, set
 
 ## Measure before printing
 
-1. Standoff thread: M2 or M2.5? The 2.9 mm hole clears both; just buy the
-   right screws.
-2. Glass front to standoff tops (8.00 mm) and the glass thickness at the edge
-   (1.32 mm). The lip depth is 8.00 - 1.32 - 0.8 = 5.9 mm. If anything sits
-   behind the glass edge inside the outer 1.6 mm band, set `lip=False` or
-   shorten the lip.
-3. Bump-out height above the standoff tops (8.38 mm). The 1 in. clearance is
-   measured from there.
-4. USB-C position: hold a ruler over the back, compare with the 16.8 x 35.1 mm
+1. How deep the standoff threads go. M2 x 8 puts about 4 mm in the standoff;
+   use M2 x 6 if the hole is shallower.
+2. Bump-out height above the standoff tops (8.38 mm here). The 1 in.
+   clearance is measured from there; if it is really 4.4 mm (16.38 from the
+   glass front, as the drawing implies), the case just has 4 mm extra room.
+3. USB-C position: hold a ruler over the back, compare with the 16.8 x 35.1 mm
    window at 47.8 mm right of centre.
+
+## 3D model of the display
+
+No STEP or STL of this display turned up online (searched GitHub, MakerWorld,
+Printables, Thingiverse, GrabCAD aggregators). The vendor pack's
+`JC1060P470C_I_W_Y.dwg` (14 MB, AutoCAD 2018 format, same mirror as above)
+contains `3DSolid` entities, so it probably holds a 3D model of the board.
+Opening it in Fusion 360, AutoCAD or DraftSight and exporting STEP should
+work; it could not be converted here because no open-source tool reads ACIS
+solids. `build_display_dummy()` in the script is a simple envelope built from
+the drawing and the measurements above.

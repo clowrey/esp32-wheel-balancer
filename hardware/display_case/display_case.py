@@ -19,7 +19,7 @@ Coordinates (all mm):
 Print it back-wall down on the bed: walls and the front lip grow upward, the
 screw counterbores open onto the bed, and no supports are needed.
 
-Run:  python display_case.py            -> writes STEP + STL next to this file
+Run:  python display_case.py            -> writes display_case.step next to this file (--stl for an STL too)
       python display_case.py --no-lip   -> case without the front lip
 """
 
@@ -35,6 +35,7 @@ from build123d import (
     Cylinder,
     Part,
     Pos,
+    Rectangle,
     RectangleRounded,
     Rot,
     SlotOverall,
@@ -59,12 +60,16 @@ class Board:
     standoff_dx: float = 166.00      # printed, hole spacing X
     standoff_dy: float = 99.00       # printed, hole spacing Y
     standoff_od: float = 5.53        # drawn standoff boss (not printed)
-    front_to_standoff: float = 8.00  # printed side-view dim (glass front -> standoff top)
-    glass_thk: float = 1.32          # side view, glass alone at the edge (not printed)
+    # Depths measured by Chester on the real unit (2026-11-11): the plastic
+    # bezel is 7 mm from the glass front to its back face, and the standoffs
+    # stand 5 mm proud of that. (The drawing's side view says 8.00 to the
+    # standoff tops, which does not match this unit.)
+    front_to_standoff: float = 12.0  # glass front -> standoff tops
+    bezel_thk: float = 7.0           # glass front -> back face of the bezel
     bump_w: float = 124.66           # printed (back cover width)
     bump_h: float = 74.67            # printed (back cover height)
     bump_r: float = 5.21             # drawn corner (not printed)
-    bump_dz: float = 8.38            # printed: standoff plane -> back of cover
+    bump_dz: float = 8.38            # printed: standoff plane -> back of cover (re-check on the unit)
     bump_cx: float = -0.15           # cover centre offset, drawing (tiny)
     bump_cy: float = 0.0
     rj45_dz: float = 4.00            # printed: RJ45 sticks out 4 mm past cover
@@ -91,15 +96,16 @@ class CaseParams:
     wall: float = 2.4                  # side wall thickness
     back: float = 2.4                  # back wall thickness
     # Front lip: extends the side wall from the standoff plane towards the
-    # glass so the gap round the edge is closed. Flush case: thin lip that
-    # stops short of the glass. Overhanging case: lip wraps the glass edge.
+    # bezel so the gap round the edge is closed. Flush case: thin lip that
+    # stops short of the bezel's back face. Overhanging case: lip wraps the
+    # bezel edge and ends flush with the glass front.
     lip: bool = True
     lip_thk: float = 1.6
-    lip_gap_to_glass: float = 0.8      # flush case: air gap left before the glass back
+    lip_gap_to_bezel: float = 0.8      # flush case: air gap left before the bezel's back face
     wrap_clearance: float = 0.4        # overhang case: gap round the glass edge
-    # Mounting screws, from the back into the display standoffs.
-    hole_d: float = 2.9                # clears M2 and M2.5
-    cbore_d: float = 5.6               # screw head (M2/M2.5 pan or socket head)
+    # Mounting screws, from the back into the display standoffs (M2, confirmed).
+    hole_d: float = 2.4                # M2 clearance
+    cbore_d: float = 4.6               # M2 socket or pan head (3.8-4.0 mm) + clearance
     screw_floor: float = 4.0           # material under the head: M2x8 -> ~4 mm in the standoff
     boss_d: float = 9.0
     # USB-C access window in the back wall, over the two ports.
@@ -110,6 +116,13 @@ class CaseParams:
     cable_slot_len: float = 22.0       # along Y
     cable_slot_w: float = 10.0         # along Z
     cable_slot_side: str = "-x"        # "-x" (JP1 side, left from the back) or "+x"
+    # Mounting tabs on the left and right walls, flush with the back face.
+    tabs: bool = True
+    tab_thk: float = 5.0
+    tab_out: float = 15.0              # how far each tab sticks out past the wall
+    tab_len: float = 40.0              # along Y
+    tab_r: float = 4.0                 # outer corner radius
+    tab_hole_d: float = 4.5            # M4 / #8 clearance; 0 for no hole
 
 
 def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
@@ -137,8 +150,8 @@ def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
             lip_in_h = b.glass_h + 2 * p.wrap_clearance
             lip_in_r = b.glass_r + p.wrap_clearance
         else:
-            # Flush case: thin lip behind the glass, stops short of it.
-            lip_depth = b.front_to_standoff - b.glass_thk - p.lip_gap_to_glass
+            # Flush case: thin lip behind the bezel, stops short of it.
+            lip_depth = b.front_to_standoff - b.bezel_thk - p.lip_gap_to_bezel
             lip_in_w, lip_in_h = out_w - 2 * p.lip_thk, out_h - 2 * p.lip_thk
             lip_in_r = max(out_r - p.lip_thk, 0.5)
         if lip_depth > 0.2:
@@ -190,16 +203,34 @@ def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
         slot = Rot(0, 90, 0) * Rot(0, 0, 90) * slot
         case -= Pos(side * (out_w / 2), slot_y, slot_z) * slot
 
+    # ---- mounting tabs, left and right, flush with the back face ----------
+    if p.tabs:
+        for side in (-1, 1):
+            # Overlap the wall by its thickness so the tab fuses into it.
+            tw = p.tab_out + p.wall
+            tx = side * (out_w / 2 + p.tab_out / 2 - p.wall / 2)
+            tab = Pos(tx, 0, total_z - p.tab_thk) * extrude(RectangleRounded(tw, p.tab_len, p.tab_r), amount=p.tab_thk)
+            # Square off the inner corners where the tab meets the wall.
+            tab += Pos(side * (out_w / 2 - p.wall / 2 + p.tab_r / 2), 0, total_z - p.tab_thk) * extrude(
+                Rectangle(p.wall + p.tab_r, p.tab_len), amount=p.tab_thk
+            )
+            case += tab
+            if p.tab_hole_d > 0:
+                hx = side * (out_w / 2 + p.tab_out / 2)
+                case -= Pos(hx, 0, total_z - p.tab_thk - 1) * Cylinder(
+                    p.tab_hole_d / 2, p.tab_thk + 2, align=(Align.CENTER, Align.CENTER, Align.MIN)
+                )
+
     return case
 
 
 def build_display_dummy(b: Board = Board()) -> Part:
     """Rough display envelope for previews and fit checks (not for printing)."""
     glass = Pos(0, 0, -b.front_to_standoff) * extrude(
-        RectangleRounded(b.glass_w, b.glass_h, b.glass_r), amount=b.glass_thk
+        RectangleRounded(b.glass_w, b.glass_h, b.glass_r), amount=b.bezel_thk
     )
-    body = Pos(0, 0, -b.front_to_standoff + b.glass_thk) * extrude(
-        RectangleRounded(165.0, 100.3, 2.0), amount=b.front_to_standoff - b.glass_thk
+    body = Pos(0, 0, -b.front_to_standoff + b.bezel_thk) * extrude(
+        RectangleRounded(165.0, 100.3, 2.0), amount=b.front_to_standoff - b.bezel_thk
     )
     bump = Pos(b.bump_cx, b.bump_cy, 0) * extrude(RectangleRounded(b.bump_w, b.bump_h, b.bump_r), amount=b.bump_dz)
     rj45 = Pos(30.3, 4.5, b.bump_dz) * extrude(RectangleRounded(17.3, 16.3, 0.5), amount=b.rj45_dz)
@@ -209,8 +240,8 @@ def build_display_dummy(b: Board = Board()) -> Part:
     standoffs = Part()
     for ix in (-1, 1):
         for iy in (-1, 1):
-            standoffs += Pos(ix * b.standoff_dx / 2, iy * b.standoff_dy / 2, -b.front_to_standoff + b.glass_thk) * Cylinder(
-                b.standoff_od / 2, b.front_to_standoff - b.glass_thk, align=(Align.CENTER, Align.CENTER, Align.MIN)
+            standoffs += Pos(ix * b.standoff_dx / 2, iy * b.standoff_dy / 2, -b.front_to_standoff + b.bezel_thk) * Cylinder(
+                b.standoff_od / 2, b.front_to_standoff - b.bezel_thk, align=(Align.CENTER, Align.CENTER, Align.MIN)
             )
     return glass + body + bump + rj45 + hdr + standoffs
 
@@ -220,16 +251,19 @@ def main() -> None:
     ap.add_argument("--overhang", type=float, default=0.0, help="mm past the glass edge (0 = flush)")
     ap.add_argument("--clearance", type=float, default=IN, help="mm of free depth behind the bump-out")
     ap.add_argument("--no-lip", action="store_true")
+    ap.add_argument("--no-tabs", action="store_true")
+    ap.add_argument("--stl", action="store_true", help="also write an STL")
     ap.add_argument("--out", default=str(Path(__file__).with_name("display_case")), help="output path stem")
     a = ap.parse_args()
 
-    p = CaseParams(overhang=a.overhang, clearance_behind_bump=a.clearance, lip=not a.no_lip)
+    p = CaseParams(overhang=a.overhang, clearance_behind_bump=a.clearance, lip=not a.no_lip, tabs=not a.no_tabs)
     case = build_case(p)
     export_step(case, a.out + ".step")
-    export_stl(case, a.out + ".stl", tolerance=0.02, angular_tolerance=0.2)
+    if a.stl:
+        export_stl(case, a.out + ".stl", tolerance=0.02, angular_tolerance=0.2)
     bb = case.bounding_box()
     print(f"case: {bb.size.X:.2f} x {bb.size.Y:.2f} x {bb.size.Z:.2f} mm, volume {case.volume / 1000:.1f} cm^3")
-    print(f"wrote {a.out}.step and {a.out}.stl")
+    print(f"wrote {a.out}.step" + (f" and {a.out}.stl" if a.stl else ""))
 
 
 if __name__ == "__main__":
