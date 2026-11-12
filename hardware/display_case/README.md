@@ -38,7 +38,8 @@ python render_preview.py
   is closed. With `--overhang` of 2 mm or more the lip instead wraps the bezel
   and ends flush with the glass front.
 - Mounting tabs on the left and right: 5 mm thick, 15 mm out from the wall,
-  40 mm long, flush with the back face, each with a 4.5 mm hole (M4 / #8).
+  91 mm long (80% of the case height), flush with the back face, each with
+  two 4.5 mm holes (M4 / #8) 71 mm apart.
 - USB-C window (16.8 x 35.1 mm) in the back wall over the two USB-C ports, so
   a cable plugs straight in for flashing. The ports point out of the back, and
   a normal plug's overmold ends inside the case, so the cable leaves through

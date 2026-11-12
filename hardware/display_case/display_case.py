@@ -120,9 +120,11 @@ class CaseParams:
     tabs: bool = True
     tab_thk: float = 5.0
     tab_out: float = 15.0              # how far each tab sticks out past the wall
-    tab_len: float = 40.0              # along Y
+    tab_len_frac: float = 0.8          # tab length along Y as a fraction of the case height
     tab_r: float = 4.0                 # outer corner radius
-    tab_hole_d: float = 4.5            # M4 / #8 clearance; 0 for no hole
+    tab_hole_d: float = 4.5            # M4 / #8 clearance; 0 for no holes
+    tab_holes: int = 2                 # holes per tab
+    tab_hole_edge: float = 10.0        # end holes' centre distance from the tab ends
 
 
 def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
@@ -207,19 +209,25 @@ def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
     if p.tabs:
         for side in (-1, 1):
             # Overlap the wall by its thickness so the tab fuses into it.
+            tab_len = p.tab_len_frac * out_h
             tw = p.tab_out + p.wall
             tx = side * (out_w / 2 + p.tab_out / 2 - p.wall / 2)
-            tab = Pos(tx, 0, total_z - p.tab_thk) * extrude(RectangleRounded(tw, p.tab_len, p.tab_r), amount=p.tab_thk)
+            tab = Pos(tx, 0, total_z - p.tab_thk) * extrude(RectangleRounded(tw, tab_len, p.tab_r), amount=p.tab_thk)
             # Square off the inner corners where the tab meets the wall.
             tab += Pos(side * (out_w / 2 - p.wall / 2 + p.tab_r / 2), 0, total_z - p.tab_thk) * extrude(
-                Rectangle(p.wall + p.tab_r, p.tab_len), amount=p.tab_thk
+                Rectangle(p.wall + p.tab_r, tab_len), amount=p.tab_thk
             )
             case += tab
-            if p.tab_hole_d > 0:
+            if p.tab_hole_d > 0 and p.tab_holes > 0:
                 hx = side * (out_w / 2 + p.tab_out / 2)
-                case -= Pos(hx, 0, total_z - p.tab_thk - 1) * Cylinder(
-                    p.tab_hole_d / 2, p.tab_thk + 2, align=(Align.CENTER, Align.CENTER, Align.MIN)
-                )
+                span = tab_len / 2 - p.tab_hole_edge
+                ys = [0.0] if p.tab_holes == 1 else [
+                    -span + 2 * span * i / (p.tab_holes - 1) for i in range(p.tab_holes)
+                ]
+                for hy in ys:
+                    case -= Pos(hx, hy, total_z - p.tab_thk - 1) * Cylinder(
+                        p.tab_hole_d / 2, p.tab_thk + 2, align=(Align.CENTER, Align.CENTER, Align.MIN)
+                    )
 
     return case
 
