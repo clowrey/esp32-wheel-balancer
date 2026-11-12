@@ -97,12 +97,9 @@ std::string BalanceJob::instruction() const {
   const double lo = test_rpm_ * (1.0 - cfg_.window), hi = test_rpm_ * (1.0 + cfg_.window);
   std::string coast;
   if (test_rpm_ > 0)
-    coast = air_drive_
-                ? fmt("Spin above %.0f rpm, cut the air, and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi)
-                : fmt("Spin it above %.0f rpm and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi);
+    coast = fmt("Spin it above %.0f rpm and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi);
   else
-    coast = air_drive_ ? "Spin it up with air and tap LOCK SPEED at the test speed you want, then let it coast."
-                       : "Spin it up and tap LOCK SPEED at the test speed you want, then let it coast.";
+    coast = "Spin it up and tap LOCK SPEED at the test speed you want, then let it coast.";
 
   auto trial_txt = [&](int p) {
     const PlaneSetup &ps = cfg_.plane[p];

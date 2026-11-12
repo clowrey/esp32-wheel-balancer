@@ -1,5 +1,5 @@
 #pragma once
-// Shared implementation of UiModel: job, runs, live averages, demo rotor.
+// Shared implementation of UiModel: job, runs, live averages, demo wheel.
 // The ESPHome component derives from it and adds acquisition + persistence;
 // tools/ui_preview uses it directly.
 
@@ -17,18 +17,17 @@ class ModelCore : public UiModel {
  public:
   ModelCore();
 
-  // Feed one analysed revolution (from acquisition or the demo rotor).
+  // Feed one analysed revolution (from acquisition or the demo wheel).
   void feed_rev(const RevResult &r, uint32_t now_ms);
   // Call often (every loop); recomputes cached statistics at ~5 Hz and steps
-  // the demo rotor.
+  // the demo wheel.
   void tick(uint32_t now_ms);
 
   void set_simulate(bool on) { simulate_ = on; }
-  // Load the starting values for a kind of work (job, measurement settings,
-  // wording). Call before restoring anything saved.
-  void apply_preset(Preset p);
-  Preset preset() const { return preset_; }
-  void set_digital_sensor(bool on) { digital_sensor_ = on; }
+  // Load the starting values for a car wheel on a soft rig (job and
+  // measurement settings). The constructor does this; call it again to
+  // start over. Call before restoring anything saved.
+  void load_defaults();
   // Largest revolution-to-revolution speed change a revolution may have and
   // still count (fraction of the period).
   void set_max_period_change(double f) { max_period_change_ = f; }
@@ -66,9 +65,8 @@ class ModelCore : public UiModel {
   void save_machine() override;
   bool start_trim() override;
   std::string machine_summary() const override;
-  bool digital_sensor() const override { return digital_sensor_; }
   bool simulate() const override { return simulate_; }
-  void sim_blast() override;
+  void sim_spin() override;
 
  protected:
   // Hooks for the device.
@@ -107,8 +105,6 @@ class ModelCore : public UiModel {
   double machine_rpm_ = 0;
   JobConfig machine_cfg_;
 
-  Preset preset_ = Preset::MOTOR_ROTOR;
-  bool digital_sensor_ = false;
   double max_period_change_ = 0.01;
   int best_effort_factor_ = 0;
   double amp_floor_um_ = 0;

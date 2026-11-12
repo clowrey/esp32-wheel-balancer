@@ -5,15 +5,13 @@
 // Each sensor raises INT when a reading is ready. Those edges and the tach
 // are latched by one MCPWM capture timer; the task reads the sensor after
 // each edge and StreamResampler (dsp_resample.h) puts both sensors and the
-// tach on one uniform grid. From there on it is the same RevolutionAnalyzer
-// and the same results as the PCM1808 path.
+// tach on one uniform grid, and RevolutionAnalyzer takes it from there.
 
 #ifdef USE_ESP32
 
 #include <atomic>
 #include <cstdint>
 
-#include "acq_capture.h"  // AcqStatus
 #include "dsp_resample.h"
 #include "dsp_revolution.h"
 #include "freertos/FreeRTOS.h"
@@ -26,6 +24,23 @@ struct mcpwm_cap_timer_t;
 struct mcpwm_cap_channel_t;
 
 namespace bal {
+
+// Live numbers for the status bar / debug page. Written by the acquisition
+// task, read by the main loop (all fields are individually atomic).
+struct AcqStatus {
+  std::atomic<uint32_t> frames{0};
+  std::atomic<uint32_t> tach_pulses{0};
+  std::atomic<uint32_t> revs{0};
+  std::atomic<uint32_t> dma_overflows{0};
+  std::atomic<uint32_t> resyncs{0};
+  std::atomic<uint32_t> glitches{0};
+  std::atomic<uint32_t> last_tach_ms{0};
+  std::atomic<float> measured_fs{0};
+  std::atomic<float> rms_g[2];
+  std::atomic<float> peak_frac[2];  // largest |sample| / full scale over the last second
+  std::atomic<bool> aligned{false};
+  std::atomic<bool> running{false};
+};
 
 struct MpuConfig {
   int i2c_port = -1;            // -1: first free port (ESPHome's own bus has port 0)
