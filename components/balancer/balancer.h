@@ -46,10 +46,14 @@ class BalancerComponent : public Component, public bal::ModelCore {
   void set_phase_sensor_a(sensor::Sensor *s) { phase_sensor_[0] = s; }
   void set_phase_sensor_b(sensor::Sensor *s) { phase_sensor_[1] = s; }
   void set_pc_log_at_boot(bool on) { pc_log_at_boot_ = on; }
+  void set_tach_teach_pin(int pin) { teach_pin_ = pin; }
 
   // --- UiModel ---
   bool pc_log() const override;
   void set_pc_log(bool on) override;
+  bool has_tach_teach() const override { return teach_pin_ >= 0; }
+  void set_tach_teach(bool on) override;
+  bool tach_teach() const override { return teach_on_; }
 
  protected:
   void persist_settings() override { save_(); }
@@ -75,6 +79,9 @@ class BalancerComponent : public Component, public bal::ModelCore {
   SavedState saved_{};
   bool acq_started_ = false;
   bool pc_log_at_boot_ = false;
+  int teach_pin_ = -1;        // drives the tach sensor's teach input through a transistor (high = teach)
+  bool teach_on_ = false;
+  uint32_t teach_since_ms_ = 0;
   uint32_t last_ui_ms_ = 0;
   uint32_t last_pub_ms_ = 0;
   sensor::Sensor *rpm_sensor_{nullptr};

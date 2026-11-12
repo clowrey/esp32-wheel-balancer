@@ -840,6 +840,7 @@ void BalancerUi::build_settings_() {
                      "Polarity: flip a sensor that is\nmounted facing the other way.\n\n"
                      "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
                      "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
+                     "TEACH TACH: hold it like the teach\nkey on the LX-101 tach sensor.\n\n"
                      "Changes apply immediately.\nSAVE keeps them after a reboot.",
                      F20, kMuted, 16, 14);
   (void) t;
@@ -847,6 +848,27 @@ void BalancerUi::build_settings_() {
   lv_obj_t *b = button_(s, LV_SYMBOL_HOME "  Home", F20, [this]() { show(HOME); }, col(kPanel2));
   lv_obj_set_pos(b, 16, 536);
   lv_obj_set_size(b, 200, 52);
+  // Press and hold: the sensor's teach input stays active for as long as the
+  // button is held, exactly like holding the key on the sensor.
+  s_teach_btn_ = button_(s, "TEACH TACH (hold)", F20, [this]() {
+    if (!model_->has_tach_teach()) toast_("No teach pin: set 'teach_pin' under 'tach' in the YAML.");
+  }, col(kPanel2));
+  lv_obj_set_pos(s_teach_btn_, 232, 536);
+  lv_obj_set_size(s_teach_btn_, 300, 52);
+  lv_obj_add_event_cb(
+      s_teach_btn_,
+      [](lv_event_t *e) {
+        auto *ui = static_cast<BalancerUi *>(lv_event_get_user_data(e));
+        const lv_event_code_t code = lv_event_get_code(e);
+        if (!ui->model_->has_tach_teach()) return;
+        const bool on = code == LV_EVENT_PRESSED;
+        if (code != LV_EVENT_PRESSED && code != LV_EVENT_RELEASED && code != LV_EVENT_PRESS_LOST) return;
+        ui->model_->set_tach_teach(on);
+        lv_label_set_text(lv_obj_get_child(ui->s_teach_btn_, 0), on ? "TEACHING..." : "TEACH TACH (hold)");
+        lv_obj_set_style_bg_color(ui->s_teach_btn_, col(on ? kAmber : kPanel2), 0);
+      },
+      LV_EVENT_ALL, this);
+
   b = button_(s, LV_SYMBOL_SAVE "  SAVE", F28, [this]() {
     model_->apply_settings(true);
     toast_("Settings saved.");

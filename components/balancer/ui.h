@@ -137,6 +137,7 @@ class BalancerUi {
   lv_point_precise_t l_wave_pts_[2][kWaveBins + 1];
   lv_obj_t *l_bars_[2][kMaxOrder] = {};
   // Bottom-right panel shows either the orders or the raw readings.
+  lv_obj_t *s_teach_btn_ = nullptr;  // settings: hold to teach the tach sensor
   lv_obj_t *l_orders_box_ = nullptr, *l_raw_box_ = nullptr, *l_view_btn_ = nullptr, *l_pclog_btn_ = nullptr;
   lv_obj_t *l_raw_[2] = {}, *l_raw_info_ = nullptr;
   lv_point_precise_t l_raw_pts_[2][LiveData::kRawPts];

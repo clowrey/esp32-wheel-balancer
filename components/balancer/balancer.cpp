@@ -6,6 +6,10 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#ifdef USE_ESP32
+#include "driver/gpio.h"
+#endif
+
 namespace esphome {
 namespace balancer {
 
@@ -36,7 +40,32 @@ void BalancerComponent::set_mpu_sensor(int ch, int address, int int_pin, int axi
   if (mpu_cfg_.sensors < ch + 1) mpu_cfg_.sensors = ch + 1;
 }
 
+// Longest a teach can be held: a dropped touch release must not leave the
+// sensor stuck in teach mode.
+static constexpr uint32_t kTeachMaxMs = 20000;
+
+void BalancerComponent::set_tach_teach(bool on) {
+  if (teach_pin_ < 0 || on == teach_on_) return;
+#ifdef USE_ESP32
+  gpio_set_level(static_cast<gpio_num_t>(teach_pin_), on ? 1 : 0);
+#endif
+  teach_on_ = on;
+  teach_since_ms_ = millis();
+  ESP_LOGI(TAG, "tach teach input %s", on ? "ON" : "off");
+}
+
 void BalancerComponent::setup() {
+#ifdef USE_ESP32
+  if (teach_pin_ >= 0) {
+    gpio_config_t io = {};
+    io.pin_bit_mask = 1ULL << teach_pin_;
+    io.mode = GPIO_MODE_OUTPUT;
+    io.pull_down_en = GPIO_PULLDOWN_ENABLE;  // transistor stays off while the pin floats at boot
+    gpio_set_level(static_cast<gpio_num_t>(teach_pin_), 0);
+    gpio_config(&io);
+    gpio_set_level(static_cast<gpio_num_t>(teach_pin_), 0);
+  }
+#endif
   // Starting values (ModelCore), then whatever was saved on top.
   if (mpu_cfg_.sensors < 2) job_.set_max_planes(1);
   if (max_speed_change_ > 0) {
@@ -136,6 +165,10 @@ void BalancerComponent::loop() {
     for (int i = 0; i < 8 && acq_pop_(rev_buf_); i++) feed_rev(rev_buf_, now);
   }
   tick(now);
+  if (teach_on_ && now - teach_since_ms_ > kTeachMaxMs) {
+    ESP_LOGW(TAG, "tach teach held for %u s: releasing it", (unsigned) (kTeachMaxMs / 1000));
+    set_tach_teach(false);
+  }
 
   if (!ui_.built() && lv_display_get_default() != nullptr) {
     ui_.build(this);
@@ -167,6 +200,7 @@ void BalancerComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Mode: %s", simulate_ ? "DEMO (simulated wheel)" : "sensors");
   ESP_LOGCONFIG(TAG, "  Tach: GPIO%d, %s edge%s", mpu_cfg_.pin_tach, mpu_cfg_.tach_falling ? "falling" : "rising",
                 mpu_cfg_.tach_pullup ? ", pull-up" : "");
+  if (teach_pin_ >= 0) ESP_LOGCONFIG(TAG, "  Tach teach output: GPIO%d (high = teach)", teach_pin_);
   static const char kAxis[] = "XYZ";
   ESP_LOGCONFIG(TAG, "  Sensors: MPU-6050 family on I2C, SDA GPIO%d, SCL GPIO%d, %u Hz", mpu_cfg_.pin_sda,
                 mpu_cfg_.pin_scl, (unsigned) mpu_cfg_.i2c_hz);

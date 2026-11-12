@@ -11,7 +11,7 @@ balancer:
     scl_pin: GPIO2
     sensor_a: {address: 0x68, int_pin: GPIO3, axis: X}
     sensor_b: {address: 0x69, int_pin: GPIO4, axis: X}   # leave out for one sensor
-  tach: {pin: GPIO32, edge: FALLING}
+  tach: {pin: GPIO32, edge: FALLING, teach_pin: GPIO20}
   rpm: {name: "Wheel speed"}
 """
 
@@ -36,6 +36,7 @@ CONF_SAMPLE_RATE = "sample_rate"
 CONF_TACH = "tach"
 CONF_EDGE = "edge"
 CONF_PULLUP = "pullup"
+CONF_TEACH_PIN = "teach_pin"
 CONF_INVERT = "invert"
 CONF_SIMULATE = "simulate"
 CONF_RPM = "rpm"
@@ -88,6 +89,9 @@ TACH_SCHEMA = cv.Schema(
         cv.Optional(CONF_PIN, default=32): pins.internal_gpio_input_pin_number,
         cv.Optional(CONF_EDGE, default="RISING"): cv.one_of("RISING", "FALLING", upper=True),
         cv.Optional(CONF_PULLUP, default=True): cv.boolean,
+        # Drives the sensor's teach input (LX-101 pink wire) through an NPN
+        # transistor or N-MOSFET: high = teach. Never wire it to pink directly.
+        cv.Optional(CONF_TEACH_PIN): pins.internal_gpio_output_pin_number,
     }
 )
 
@@ -194,6 +198,8 @@ async def to_code(config):
 
     tach = config[CONF_TACH]
     cg.add(var.set_tach(tach[CONF_PIN], tach[CONF_EDGE] == "FALLING", tach[CONF_PULLUP]))
+    if CONF_TEACH_PIN in tach:
+        cg.add(var.set_tach_teach_pin(tach[CONF_TEACH_PIN]))
     cg.add(var.set_simulate(config[CONF_SIMULATE]))
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
     cg.add(var.set_pc_log_at_boot(config[CONF_PC_LOG]))

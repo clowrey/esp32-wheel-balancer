@@ -33,6 +33,7 @@ balancer:
     pin: GPIO32           # JP1 pin 19: LX-101 black wire (NPN open collector), 4.7k to 3V3
     edge: FALLING         # the LX-101 pulls low when its output switches on
     pullup: true
+    teach_pin: GPIO20     # JP1 pin 17: NPN transistor to the LX-101 pink wire (TEACH TACH on Settings)
   rpm:
     name: "Wheel speed"
   amplitude_a:

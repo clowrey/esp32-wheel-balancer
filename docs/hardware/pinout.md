@@ -17,7 +17,7 @@ working CellKeeper-BMS-LCD ESPHome config.
 | 11 | **GPIO3**: INT, sensor A (0x68) | 12 | GPIO46: spare |
 | 13 | **GPIO4**: INT, sensor B (0x69, AD0 to VCC) | 14 | GPIO45: spare |
 | 15 | GPIO5: avoid (LCD reset in CellKeeper YAML) | 16 | GND: tach sensor 0 V |
-| 17 | GPIO20: spare (second sensor bus if needed) | 18 | 3V3: 4.7 kΩ tach pull-up |
+| 17 | **GPIO20**: tach teach (NPN transistor to LX-101 pink) | 18 | 3V3: 4.7 kΩ tach pull-up |
 | 19 | **GPIO32**: tach in (LX-101 black, open collector) | 20 | C6_U0RXD |
 | 21 | GPIO33: spare (second sensor bus if needed) | 22 | C6_U0TXD |
 | 23 | ES_I2C_SDA (GPIO7): onboard bus | 24 | C6_IO9 |

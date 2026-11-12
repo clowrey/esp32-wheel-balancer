@@ -26,6 +26,7 @@ marked edge (wire 1 = pin 1).
 | 16 | GND | tach sensor 0 V (LX-101 blue) and the negative of its supply |
 | 18 | 3V3 | top of the tach pull-up resistor |
 | 19 | GPIO32 | tach signal (LX-101 black) |
+| 17 | GPIO20 | tach teach: base resistor of the transistor that pulls LX-101 pink low (optional) |
 
 Leave the other wires unconnected. Pins 2 and 4 (VOUT-BAT) and the C6 pins on
 the even side are not used.
@@ -78,7 +79,7 @@ so the signal wire can be pulled up to the P4's 3.3 V directly.
 | Blue | 0 V | supply negative **and** JP1 pin 16 (GND) |
 | Black | Output 1 (NPN open collector) | JP1 pin 19 (GPIO32) |
 | White | Output 2 (inverse of output 1) | not used: insulate it |
-| Pink | Teaching input | not used: insulate it, teach with the buttons |
+| Pink | Teaching input | collector of the teach transistor (below), or insulate it and teach with the buttons |
 
 - Fit a 4.7 kΩ resistor from pin 19 to pin 18 (3V3). The firmware's internal
   pull-up is on as well, but it is weak for two metres of cable.
@@ -92,6 +93,27 @@ so the signal wire can be pulled up to the P4's 3.3 V directly.
   low). Whichever way the teaching ends up, there is one such edge per
   revolution, and that edge is the 0° mark for every angle the screen shows.
 - Response time is 45 µs: a fixed 0.06° at 4 revolutions a second.
+
+### Teaching from the screen (optional)
+
+The pink wire is the LX-101's external teach input. Pulled below 2 V it acts
+like holding the teach key; left open it sits at about 5 V inside the sensor
+(10 kΩ), so it must **not** go straight to a P4 pin. Switch it with a small
+transistor:
+
+- GPIO20 (JP1 pin 17) → 1 kΩ → base of an NPN (2N3904, BC547).
+- Emitter → GND (JP1 pin 16, the same 0 V as the blue wire).
+- Collector → pink.
+
+A 2N7000 N-MOSFET works the same way: gate through 100 Ω to GPIO20, a 100 kΩ
+from gate to GND, drain to pink, source to GND.
+
+`teach_pin: GPIO20` under `tach:` in the YAML turns on the **TEACH TACH (hold)**
+button on the Settings screen. The teach input is active for as long as the
+button is held (at most 20 s), so use it exactly as you would the sensor's own
+key, for example held while the mark passes a few times in full-auto teaching.
+Panasonic's datasheet gives the input levels but not the external-input
+sequence for each teach mode; check the LX-101 instruction sheet for that.
 
 Any other sensor that gives one clean pulse per revolution works the same
 way, as long as its output is open-collector or 3.3 V logic.

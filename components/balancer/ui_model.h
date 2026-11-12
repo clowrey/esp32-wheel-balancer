@@ -70,7 +70,14 @@ class UiModel {
 
   // Raw stream of every reading to the USB log, for a PC (tools/mpu_log.py).
   virtual bool pc_log() const { return false; }
-  virtual void set_pc_log(bool on) {}
+  virtual void set_pc_log(bool /*on*/) {}
+
+  // Teach input of the tach sensor (LX-101 pink wire, through a transistor).
+  // While on, the sensor sees its teach key held down. has_tach_teach() is
+  // false when no teach_pin is set in the YAML.
+  virtual bool has_tach_teach() const { return false; }
+  virtual void set_tach_teach(bool /*on*/) {}
+  virtual bool tach_teach() const { return false; }
 
   // Demo mode with the simulated wheel.
   virtual bool simulate() const = 0;
