@@ -60,6 +60,8 @@ void BalancerComponent::setup() {
     if (!acq_started_) {
       ESP_LOGE(TAG, "acquisition failed to start (check the sensor wiring and tach pin)");
       this->status_set_error(LOG_STR("acquisition failed"));
+    } else if (pc_log_at_boot_) {
+      set_pc_log(true);
     }
   }
 #endif
@@ -107,6 +109,23 @@ void BalancerComponent::update_acq_status_() {
   for (int c = 0; c < 2; c++) {
     live_.rms_g[c] = st.rms_g[c].load();
     live_.peak_frac[c] = st.peak_frac[c].load();
+    live_.raw_n[c] = mpu_->copy_raw(c, live_.raw[c], bal::LiveData::kRawPts);
+  }
+#endif
+}
+
+bool BalancerComponent::pc_log() const {
+#ifdef USE_ESP32
+  if (mpu_) return mpu_->streaming();
+#endif
+  return false;
+}
+
+void BalancerComponent::set_pc_log(bool on) {
+#ifdef USE_ESP32
+  if (mpu_) {
+    mpu_->set_stream(on);
+    ESP_LOGI(TAG, "raw stream to the PC log %s", on ? "on (tools/mpu_log.py)" : "off");
   }
 #endif
 }

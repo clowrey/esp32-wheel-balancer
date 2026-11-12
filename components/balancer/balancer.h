@@ -45,6 +45,11 @@ class BalancerComponent : public Component, public bal::ModelCore {
   void set_amp_sensor_b(sensor::Sensor *s) { amp_sensor_[1] = s; }
   void set_phase_sensor_a(sensor::Sensor *s) { phase_sensor_[0] = s; }
   void set_phase_sensor_b(sensor::Sensor *s) { phase_sensor_[1] = s; }
+  void set_pc_log_at_boot(bool on) { pc_log_at_boot_ = on; }
+
+  // --- UiModel ---
+  bool pc_log() const override;
+  void set_pc_log(bool on) override;
 
  protected:
   void persist_settings() override { save_(); }
@@ -69,6 +74,7 @@ class BalancerComponent : public Component, public bal::ModelCore {
   ESPPreferenceObject pref_;
   SavedState saved_{};
   bool acq_started_ = false;
+  bool pc_log_at_boot_ = false;
   uint32_t last_ui_ms_ = 0;
   uint32_t last_pub_ms_ = 0;
   sensor::Sensor *rpm_sensor_{nullptr};

@@ -2,7 +2,9 @@
 
 #ifdef USE_ESP32
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "driver/i2c_master.h"
@@ -14,6 +16,7 @@
 namespace bal {
 
 static const char *const TAG = "balancer.mpu";
+static const char *const TAG_RAW = "mpu.raw";
 
 namespace {
 
@@ -108,10 +111,12 @@ bool MpuAcquisition::setup_i2c_() {
   // cut off mid-transfer, holding SDA low. Clock it free before probing.
   i2c_master_bus_reset(bus_);
   for (int s = 0; s < cfg_.sensors; s++) {
-    if (i2c_master_probe(bus_, cfg_.address[s], 50) != ESP_OK) {
-      ESP_LOGE(TAG, "sensor %c: nothing answers at 0x%02X (check wiring; AD0 high selects 0x69)", 'A' + s,
-               cfg_.address[s]);
-      return false;
+    // A sensor that doesn't answer yet is still added: the acquisition task
+    // keeps clearing the bus and setting it up until it does, so a sensor
+    // that was stuck at boot no longer needs a power cycle.
+    if (!probe_(s, 3)) {
+      ESP_LOGE(TAG, "sensor %c: nothing answers at 0x%02X yet (check wiring; AD0 high selects 0x69); will keep trying",
+               'A' + s, cfg_.address[s]);
     }
     i2c_device_config_t dcfg = {};
     dcfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
@@ -123,6 +128,18 @@ bool MpuAcquisition::setup_i2c_() {
     }
   }
   return true;
+}
+
+bool MpuAcquisition::probe_(int s, int tries) {
+  for (int i = 0; i < tries; i++) {
+    if (i > 0) {
+      // Nine clocks and a STOP release a sensor that is holding SDA low.
+      i2c_master_bus_reset(bus_);
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (i2c_master_probe(bus_, cfg_.address[s], 50) == ESP_OK) return true;
+  }
+  return false;
 }
 
 bool MpuAcquisition::setup_sensor_(int s) {
@@ -245,8 +262,12 @@ bool MpuAcquisition::start(const MpuConfig &cfg) {
   }
   if (!setup_capture_()) return false;
   if (!setup_i2c_()) return false;
-  for (int s = 0; s < cfg_.sensors; s++)
-    if (!setup_sensor_(s)) return false;
+  for (int s = 0; s < cfg_.sensors; s++) {
+    if (!setup_sensor_(s)) {
+      chip_[s] = "not answering (retrying)";
+      ESP_LOGW(TAG, "sensor %c: not set up yet; retrying every 3 s", 'A' + s);
+    }
+  }
 
   // Analysis runs on the resampler's grid. Slow rotors: keep revolutions down
   // to 30 rpm, and size the ring for two of the slowest. The filter delay is
@@ -274,6 +295,57 @@ bool MpuAcquisition::start(const MpuConfig &cfg) {
 void MpuAcquisition::task_trampoline_(void *arg) {
   static_cast<MpuAcquisition *>(arg)->task_();
   vTaskDelete(nullptr);
+}
+
+int MpuAcquisition::copy_raw(int ch, float *out, int max) const {
+  if (ch < 0 || ch >= cfg_.sensors || max <= 0) return 0;
+  const uint32_t n = raw_n_[ch].load(std::memory_order_acquire);
+  const int count = static_cast<int>(std::min<uint32_t>(n, std::min<uint32_t>(max, kRawLen)));
+  // Oldest first. The task may overwrite the oldest few while this copies;
+  // that only nudges a display trace.
+  for (int i = 0; i < count; i++) out[i] = raw_[ch][(n - count + i) % kRawLen];
+  return count;
+}
+
+void MpuAcquisition::set_stream(bool on) {
+  if (on && !stream_.load()) {
+    ESP_LOGI(TAG_RAW, "MPU CFG range=%d rate=%u filter=%d sensors=%d axisA=%d axisB=%d clock=%u", cfg_.range_g,
+             (unsigned) cfg_.sample_rate, cfg_.filter_hz, cfg_.sensors, cfg_.axis[0], cfg_.axis[1],
+             (unsigned) cap_resolution_);
+    stream_reset_.store(true);
+  }
+  stream_.store(on);
+}
+
+void MpuAcquisition::stream_push_(int s, uint32_t ticks, const int16_t xyz[3]) {
+  // Extend the 32-bit capture timer (wraps every ~54 s at 80 MHz) to 64 bits.
+  // Both sensors share one extension; a signed step tolerates their edges
+  // arriving slightly out of order.
+  if (stream_reset_.exchange(false)) {
+    stream_ticks_init_ = false;
+    batch_[0].n = batch_[1].n = 0;
+  }
+  if (!stream_ticks_init_) {
+    stream_last_ticks_ = ticks;
+    stream_ticks64_ = ticks;
+    stream_ticks_init_ = true;
+  }
+  stream_ticks64_ += static_cast<int32_t>(ticks - stream_last_ticks_);
+  stream_last_ticks_ = ticks;
+  StreamBatch &bt = batch_[s];
+  const uint64_t us = stream_ticks64_ / (cap_resolution_ / 1000000u);
+  if (bt.n == 0) bt.t0_us = us;
+  bt.dt_us[bt.n] = static_cast<uint32_t>(us - bt.t0_us);
+  for (int k = 0; k < 3; k++) bt.xyz[bt.n][k] = xyz[k];
+  if (++bt.n < kBatch) return;
+  // One log line per batch: "MPU A <t0_us> <n> dt,x,y,z ..." in raw counts.
+  char line[kBatch * 26 + 48];
+  int p = snprintf(line, sizeof(line), "MPU %c %llu %d", 'A' + s, static_cast<unsigned long long>(bt.t0_us), bt.n);
+  for (int i = 0; i < bt.n && p < static_cast<int>(sizeof(line)) - 26; i++)
+    p += snprintf(line + p, sizeof(line) - p, " %u,%d,%d,%d", (unsigned) bt.dt_us[i], bt.xyz[i][0], bt.xyz[i][1],
+                  bt.xyz[i][2]);
+  ESP_LOGI(TAG_RAW, "%s", line);
+  bt.n = 0;
 }
 
 bool MpuAcquisition::pop(RevResult &out) {
@@ -310,10 +382,17 @@ void MpuAcquisition::task_() {
         // A new reading landed during the read: no telling which one we got.
         missed_++;
       } else {
-        const int a = cfg_.axis[s];
-        const int16_t raw = static_cast<int16_t>((static_cast<uint16_t>(b[2 * a]) << 8) | b[2 * a + 1]);
+        int16_t xyz[3];
+        for (int k = 0; k < 3; k++)
+          xyz[k] = static_cast<int16_t>((static_cast<uint16_t>(b[2 * k]) << 8) | b[2 * k + 1]);
+        const int16_t raw = xyz[cfg_.axis[s]];
         float g = static_cast<float>(raw) * g_per_count_;
         if (invert_[s].load(std::memory_order_relaxed)) g = -g;
+        // Recent readings for the LIVE screen's raw trace.
+        const uint32_t w = raw_n_[s].load(std::memory_order_relaxed);
+        raw_[s][w % kRawLen] = g;
+        raw_n_[s].store(w + 1, std::memory_order_release);
+        if (stream_.load(std::memory_order_relaxed)) stream_push_(s, e.ticks, xyz);
         sum_[s] += g;
         sq_sum_[s] += static_cast<double>(g) * g;
         stat_n_[s]++;
@@ -363,13 +442,20 @@ void MpuAcquisition::task_() {
         stat_n_[c] = 0;
       }
       // A sensor that lost power or was re-plugged comes back asleep with its
-      // interrupt off: set it up again (this stalls the other one for ~0.15 s).
+      // interrupt off, and one that hung mid-transfer holds SDA low until the
+      // bus is clocked free: clear the bus and set it up again (this stalls
+      // the other sensor for ~0.15 s). This also picks up a sensor that did
+      // not answer at boot.
       for (int c = 0; c < cfg_.sensors; c++) {
         if (now_ms - last_reading_ms[c] > 1500 && now_ms - last_reinit_ms[c] > 3000) {
           last_reinit_ms[c] = now_ms;
-          if (setup_sensor_(c)) {
+          if (!probe_(c, 3)) {
+            if (!silent_logged_[c]) ESP_LOGW(TAG, "sensor %c is silent and not answering; still trying", 'A' + c);
+            silent_logged_[c] = true;
+          } else if (setup_sensor_(c)) {
             delay_ticks_[c] = static_cast<uint32_t>(delay_s_[c] * static_cast<double>(cap_resolution_) + 0.5);
             ESP_LOGW(TAG, "sensor %c was silent and has been set up again", 'A' + c);
+            silent_logged_[c] = false;
           }
         }
       }

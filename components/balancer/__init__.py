@@ -56,6 +56,7 @@ CONF_ADDRESS = "address"
 CONF_INT_PIN = "int_pin"
 CONF_AXIS = "axis"
 CONF_MAX_SPEED_CHANGE = "max_speed_change"
+CONF_PC_LOG = "pc_log"
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
 
@@ -157,6 +158,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_MPU6050): MPU6050_SCHEMA,
             # Largest speed change from one revolution to the next that still counts.
             cv.Optional(CONF_MAX_SPEED_CHANGE): cv.percentage,
+            # Stream every raw reading to the USB log from boot (tools/mpu_log.py).
+            # It can also be switched on the LIVE screen.
+            cv.Optional(CONF_PC_LOG, default=False): cv.boolean,
             cv.Optional(CONF_RPM): sensor.sensor_schema(
                 unit_of_measurement="rpm",
                 icon="mdi:rotate-right",
@@ -192,6 +196,7 @@ async def to_code(config):
     cg.add(var.set_tach(tach[CONF_PIN], tach[CONF_EDGE] == "FALLING", tach[CONF_PULLUP]))
     cg.add(var.set_simulate(config[CONF_SIMULATE]))
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
+    cg.add(var.set_pc_log_at_boot(config[CONF_PC_LOG]))
     if CONF_MAX_SPEED_CHANGE in config:
         cg.add(var.set_max_speed_change(config[CONF_MAX_SPEED_CHANGE]))
     mpu = config[CONF_MPU6050]

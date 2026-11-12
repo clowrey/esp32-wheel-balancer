@@ -25,6 +25,11 @@ struct LiveData {
   bool acq_ok = false;         // acquisition running
   bool aligned = false;        // timebase locked
   unsigned resyncs = 0, overflows = 0, glitches = 0, tach_pulses = 0;
+  // The latest raw readings of each sensor's measured axis (g, oldest first),
+  // for the LIVE screen's raw trace. raw_n is 0 when there are none (demo).
+  static constexpr int kRawPts = 500;
+  float raw[kChannels][kRawPts] = {};
+  int raw_n[kChannels] = {0, 0};
 };
 
 struct UiSettings {
@@ -62,6 +67,10 @@ class UiModel {
   virtual void save_machine() = 0;
   virtual bool start_trim() = 0;
   virtual std::string machine_summary() const = 0;
+
+  // Raw stream of every reading to the USB log, for a PC (tools/mpu_log.py).
+  virtual bool pc_log() const { return false; }
+  virtual void set_pc_log(bool on) {}
 
   // Demo mode with the simulated wheel.
   virtual bool simulate() const = 0;
