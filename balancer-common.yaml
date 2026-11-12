@@ -6,7 +6,7 @@ esphome:
   friendly_name: ${friendly_name}
   min_version: 2026.9.0
   project:
-    name: "clowrey.p4-balancer"
+    name: "clowrey.esp32-wheel-balancer"
     version: "0.1.0"
   on_boot:
     priority: -100

@@ -250,7 +250,7 @@ ESPHome only copies top-level files of an external component, so the
 component is flat, with prefixes instead of subdirectories.
 
 ```
-p4-balancer/
+esp32-wheel-balancer/
 ├── balancer-tire.yaml                  # device: two MPU-6050 boards and the tach
 ├── balancer-tire-demo.yaml             # device: same firmware, simulated wheel
 ├── balancer-common.yaml                # board, network, display

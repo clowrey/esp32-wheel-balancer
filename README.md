@@ -60,3 +60,11 @@ or `esptool.py write_flash 0x0 <file>`, then use `.ota.bin` files or
 - `tools/ui_preview/`: renders every screen on a PC
 - `tools/crosscheck_pyprb.py`: solver cross-check against pyPRB
 - `docs/hardware/`: pinout (JP1), tire rig, schematic
+
+## License
+The firmware, tools and docs in this repo are MIT licensed (see `LICENSE`).
+Third-party files keep their own terms:
+- `tests/third_party/doctest.h`: doctest, MIT licensed.
+- `docs/hardware/schematic/JC1060P470C_I_W_Y-V1.0.pdf`: Guition's schematic
+  for the JC1060P470C board, included for reference. It belongs to Guition and
+  is not covered by this repo's license.

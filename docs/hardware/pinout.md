@@ -1,4 +1,4 @@
-# JC1060P470C pinout (as used by p4-balancer)
+# JC1060P470C pinout (as used by esp32-wheel-balancer)
 
 Source: `schematic/JC1060P470C_I_W_Y-V1.0.pdf` (Guition, 9/06/2025) and the
 working CellKeeper-BMS-LCD ESPHome config.
