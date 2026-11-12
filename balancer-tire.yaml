@@ -24,11 +24,11 @@ balancer:
     sensor_a:             # on the bearing nearest the wheel
       address: 0x68       # AD0 left open
       int_pin: GPIO3      # JP1 pin 11
-      axis: X
+      axis: Z             # through the board: its flat side faces along the motion
     sensor_b:             # on the far bearing; delete this block to run one sensor (single plane)
       address: 0x69       # AD0 tied to VCC
       int_pin: GPIO4      # JP1 pin 13
-      axis: X
+      axis: Z
   tach:
     pin: GPIO32           # JP1 pin 19: LX-101 black wire (NPN open collector), 4.7k to 3V3
     edge: FALLING         # the LX-101 pulls low when its output switches on

@@ -55,10 +55,14 @@ block. The firmware then limits the job to one plane.
 - Fix each board rigidly to a bearing housing: screws through the two
   mounting holes, or epoxy. Foam tape and loose zip ties add their own wobble.
 - Sensor A goes on the bearing next to the wheel, sensor B on the far one.
-- The **X arrow** on the board must point along the motion being measured:
-  horizontal, at right angles to the shaft. Point both boards the same way.
-  If one has to face the other way, flip it under Settings, "Sensor B
-  polarity". To use a different axis set `axis: Y` or `axis: Z` in the YAML.
+- The firmware reads the **Z axis**, which runs straight through the board
+  (underside to component side). Mount each board flat against a vertical
+  face of the bearing housing, so the board faces along the motion being
+  measured: horizontal, at right angles to the shaft. Face both boards the
+  same way (component sides both pointing the same direction). If one has to
+  face the other way, flip it under Settings, "Sensor B polarity". To use an
+  in-plane axis instead, set `axis: X` or `axis: Y` in the YAML; the X and Y
+  arrows are printed on the board.
 - Tie the leads down a few centimetres from the board so they cannot tug on
   it.
 
