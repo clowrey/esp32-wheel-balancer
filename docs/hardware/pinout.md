@@ -23,6 +23,23 @@ working CellKeeper-BMS-LCD ESPHome config.
 | 23 | ES_I2C_SDA (GPIO7) — ADS1115 | 24 | C6_IO9 |
 | 25 | ES_I2C_SCL (GPIO8) — ADS1115 | 26 | C6_CHIP_PU |
 
+### Tire variant (`balancer-tire.yaml`)
+
+The same header pins carry two GY-521 (MPU-6050) boards in place of the
+PCM1808. Full notes in [tire-rig.md](tire-rig.md).
+
+| Pin | Signal |
+|---|---|
+| 1 or 3 | 3V3 to both sensor boards |
+| 5 | GND |
+| 7 | GPIO1: SDA |
+| 9 | GPIO2: SCL |
+| 11 | GPIO3: INT, sensor A (address 0x68) |
+| 13 | GPIO4: INT, sensor B (address 0x69, AD0 tied to VCC) |
+| 16 | GND: tach sensor 0 V |
+| 18 | 3V3: 4.7 kΩ pull-up to pin 19 |
+| 19 | GPIO32: tach in (LX-101 black wire, open collector) |
+
 ## Onboard functions (do not reuse)
 
 | Function | GPIO |

@@ -31,8 +31,8 @@ balancer:
       int_pin: GPIO4      # JP1 pin 13
       axis: X
   tach:
-    pin: GPIO32           # JP1 pin 19, one 3.3 V pulse per revolution
-    edge: RISING
+    pin: GPIO32           # JP1 pin 19: LX-101 black wire (NPN open collector), 4.7k to 3V3
+    edge: FALLING         # the LX-101 pulls low when its output switches on
     pullup: true
   rpm:
     name: "Wheel speed"

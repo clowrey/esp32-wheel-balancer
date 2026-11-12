@@ -23,6 +23,13 @@ this design is built to avoid.
 | Framework | **ESPHome** + external C++ component | As in §2 |
 | Rotor drive | **None. Rotor is spun with compressed air.** No motor drive, no valve output | Speed is not regulated, so measurement uses a speed window and coast-down capture (§5.1) |
 
+**Added 2026-11-11: tire variant.** A second, quick-to-build sensor path for
+car wheels, using parts on hand: two GY-521 (MPU-6050) boards on I²C, a
+leaf-spring rig, the wheel spun by hand. Same board, UI, analysis and solver;
+selected in YAML with `sensor_type: mpu6050` and `preset: tire`. The IEPE +
+PCM1808 design stays the main path for stiff stands and fast rotors. Details
+in §3.3 and `docs/hardware/tire-rig.md`.
+
 ---
 
 ## 1. Goals and non-goals
@@ -124,6 +131,37 @@ untouched; the ES8311 + speaker (amp enable GPIO11) can be used for beeps.
 **To verify on the bench before PCB work:** GPIO5 really is free or really
 is the LCD reset on this board revision; GPIO3 can be an I²S output and an
 MCPWM capture input at the same time through the GPIO matrix.
+
+### 3.3 Tire variant: MPU-6050 on I²C
+
+For slow, heavy rotors on a soft rig the signal is large (the hub moves about
+U/M, hundreds of µm for a typical wheel), so a MEMS accelerometer at
+400 µg/√Hz is enough. Two GY-521 boards share one I²C bus on JP1 (SDA GPIO1,
+SCL GPIO2), one INT line each (GPIO3, GPIO4), tach on GPIO32 as before.
+
+The rule from §4 still holds: every time is a hardware-latched capture value.
+
+- Each sensor's data-ready edge and the tach are latched by one MCPWM capture
+  timer. The acquisition task (`acq_mpu`, core 1) reads a sensor after its
+  edge and discards the reading if another edge arrived before the read
+  finished, so a reading is never paired with the wrong timestamp.
+- The sensors run on their own oscillators at slightly different rates.
+  `dsp_resample` interpolates each one onto a uniform grid defined by the
+  capture timer (250 Hz by default). Tach edges land on that grid by
+  division. Missing readings are bridged; a long dropout restarts the grid.
+- The sensor's low-pass group delay (4.9 ms at 44 Hz) is removed like the
+  PCM1808's delay.
+- The sensor bus is not ESPHome's: it is a second I²C port owned by the
+  acquisition task, so nothing in `loop()` touches it.
+
+The `tire` preset (`ui_core.cpp`) sets a 20 kg wheel, G6.3 at 800 rpm, 30 g
+trial weights at 200 mm, add-weight corrections, displacement units, a ±10%
+window, up to 3% speed change per revolution and best-effort readiness after
+four times the minimum revolutions. Presets keep separate saved state.
+
+The rig must be soft: sway and twist resonances at a third of the spin speed
+or lower (tap test). Near resonance the phase moves with speed and nothing
+downstream can fix that.
 
 ---
 
@@ -320,17 +358,22 @@ component is flat, with prefixes instead of subdirectories.
 p4-balancer/
 ├── balancer-jc1060p470.yaml            # device: real sensors
 ├── balancer-demo.yaml                  # device: simulated rotor (no front end)
+├── balancer-tire.yaml                  # device: tire balancer, two MPU-6050 boards
+├── balancer-tire-demo.yaml             # device: tire balancer, simulated wheel
+├── balancer-common.yaml                # board, network, display: shared by all of the above
 ├── hardware_guition_jc1060p470.yaml    # board config from CellKeeper
 ├── components/balancer/
 │   ├── __init__.py                     # YAML schema, codegen, LVGL widget/font registration
 │   ├── balancer.{h,cpp}                # ESPHome glue: acquisition, NVS, sensors
 │   ├── acq_capture.{h,cpp}             # ESP-IDF: I2S1 + MCPWM capture task
+│   ├── acq_mpu.{h,cpp}                 # ESP-IDF: MPU-6050 on I2C, timed by MCPWM capture
 │   ├── dsp_types.h                     # conventions (lag-complex vectors, g*mm weights)
 │   ├── dsp_revolution.{h,cpp}          # per-revolution DFT of orders 1-10
 │   ├── dsp_measurement.{h,cpp}         # speed window / coast-down accumulator
 │   ├── dsp_balance.{h,cpp}             # influence coefficients, split, drill, ISO
 │   ├── dsp_job.{h,cpp}                 # wizard state and arithmetic
 │   ├── dsp_timebase.{h,cpp}            # tach ticks -> fractional sample index
+│   ├── dsp_resample.{h,cpp}            # digital sensors -> uniform grid on the capture timer
 │   ├── dsp_sim.{h,cpp}                 # revolution-level demo rotor
 │   ├── ui_model.h, ui_core.{h,cpp}     # what the UI needs + shared implementation
 │   └── ui.{h,cpp}                      # LVGL 9 screens, dials, polar plots
@@ -386,6 +429,15 @@ p4-balancer/
 - Full two-plane procedure; verify the residual drops to the predicted level.
 - Repeatability: 5 runs with no changes, phase σ < 2°.
 
+### Phase 4b — Tire rig with MPU-6050 sensors  — firmware written; simulated end to end; bench test pending
+- `balancer-tire.yaml` on the 7" board, two GY-521 boards, leaf-spring rig.
+- Host test: two sensors on their own clocks with noise, lost readings and
+  hand-spin coast-downs, through the resampler and `ModelCore`. 35 g and
+  25 g on the two rim edges come back within 2% and 2°, and the verify run
+  is inside the limit.
+- On the bench: confirm both sensors report about 250 Hz on the LIVE screen,
+  tap-test the rig, then balance a wheel with a known added weight.
+
 ### Phase 5 — Persistence and export (1–2 days)  — settings, rotor setup and machine in NVS; HA sensors done; CSV export open
 - Machines and jobs in NVS (small) or SD (larger, CSV).
 - Web/HA export of run vectors; CSV download.
@@ -410,6 +462,10 @@ p4-balancer/
 | Stand resonance near the test speed makes phase speed-sensitive | Phase-vs-speed check in the window (§5.1); move the test speed |
 | Too few revolutions in the window on one coast-down | Passes accumulate; the window and revolution count are adjustable |
 | Board revision differences (I²C addresses differ between users) | Scan on boot and show on the debug page |
+
+| Tire rig resonance too close to the spin speed | Tap test before measuring; lengthen the spring (§3.3) |
+| MPU-6050 readings mis-timed when the task is late | Readings that cannot be tied to one edge are dropped and bridged; count shown on the LIVE screen |
+| Long I²C leads to the sensors on a moving rig | Short leads with a ground wire; 100 kHz option |
 
 **Still open**
 1. Balancing stand: soft-bearing (pendulum or spring supports, measure above

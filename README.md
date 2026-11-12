@@ -5,6 +5,10 @@ Two-plane dynamic balancer on the Guition JC1060P470C (ESP32-P4, 7"
 "drill 1.99 g at 29°" out, drawn on rotor dials on the LCD.
 Default target: a 1 hp motor rotor on a stand, spun with compressed air.
 
+There is also a **tire balancer** variant for the same board: two GY-521
+(MPU-6050) boards on I²C in place of the analog front end, a car wheel on a
+leaf-spring rig, spun by hand. See [docs/hardware/tire-rig.md](docs/hardware/tire-rig.md).
+
 ![Correction screen](docs/ui/07_result.png)
 
 ## Status
@@ -13,9 +17,10 @@ Default target: a 1 hp motor rotor on a stand, spun with compressed air.
 |---|---|
 | 0 Board bring-up | config compiles in CI; needs the bench check (LCD reset GPIO5 vs GPIO0) |
 | 1 Acquisition (I2S + MCPWM capture) | written; timebase host-tested; needs the PCM1808 on the bench |
-| 2 DSP + balancing math | done: 17 host tests, simulator exit test, pyPRB cross-check |
+| 2 DSP + balancing math | done: 22 host tests, simulator exit tests, pyPRB cross-check |
 | 3 Touchscreen UI | done: all screens, previewed on PC ([docs/ui](docs/ui)) |
 | 4 Real rotor | waiting on sensors + front end |
+| 4b Tire rig (MPU-6050) | firmware written and simulated end to end; needs the sensors on the bench |
 | 5 Persistence / export | settings, rotor setup and saved machine in flash; HA sensors |
 | 6 Front-end PCB | later |
 
@@ -29,6 +34,9 @@ GitHub Actions compiles every push. The newest binaries are attached to the
   SPEED, trial runs, correction, verify.
 - `balancer.factory.bin` — real sensors (PCM1808 on JP1, tach on GPIO32).
 - `bringup.factory.bin` — board only, one label (Phase 0 check).
+- `balancer-tire-demo.factory.bin` — the tire balancer with a simulated wheel.
+- `balancer-tire.factory.bin` — the tire balancer with two MPU-6050 boards
+  (wiring in [docs/hardware/tire-rig.md](docs/hardware/tire-rig.md)).
 
 Flash the `.factory.bin` over USB with [ESPHome Web](https://web.esphome.io)
 or `esptool.py write_flash 0x0 <file>`, then use `.ota.bin` files or
@@ -46,16 +54,22 @@ or `esptool.py write_flash 0x0 <file>`, then use `.ota.bin` files or
   add up until the 1× phase is settled.
 - Influence-coefficient solver: single and two plane, trim runs, add or
   drill, fixed positions, ISO 21940-11 limit, trial-weight helper.
+- Tire variant: each MPU-6050 reading is timestamped on its data-ready edge by
+  the same capture timer as the tach, then both sensors are interpolated onto
+  one uniform grid. The analysis and solver are the same code.
 
 ## Repo map
 - `PLAN.md` — architecture, decisions, phases, open questions
-- `balancer-jc1060p470.yaml`, `balancer-demo.yaml` — device configs
+- `balancer-jc1060p470.yaml`, `balancer-demo.yaml` — device configs (PCM1808 + IEPE)
+- `balancer-tire.yaml`, `balancer-tire-demo.yaml` — tire balancer (MPU-6050)
+- `balancer-common.yaml` — board, network and display, shared by all of them
 - `hardware_guition_jc1060p470.yaml` — board config (from CellKeeper-BMS-LCD)
 - `components/balancer/` — ESPHome component (flat layout, see below)
   - `dsp_*` pure C++: revolution analysis, measurement, solver, job, timebase, demo rotor
   - `acq_capture.*` I2S + MCPWM acquisition task (ESP-IDF)
+  - `acq_mpu.*` MPU-6050 acquisition task: I2C reads timed by MCPWM capture
   - `ui*.{h,cpp}` LVGL screens + shared model; `balancer.*` ESPHome glue
 - `tests/` — host tests (`cmake -S tests -B build/tests && ctest --test-dir build/tests`)
 - `tools/ui_preview/` — renders every screen on a PC
 - `tools/crosscheck_pyprb.py` — solver cross-check against pyPRB
-- `docs/hardware/` — pinout (JP1), front end, schematic
+- `docs/hardware/` — pinout (JP1), front end, tire rig, schematic
