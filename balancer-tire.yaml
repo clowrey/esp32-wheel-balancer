@@ -15,7 +15,7 @@ balancer:
   id: rotor_balancer
   simulate: ${simulate}
   mpu6050:
-    sda_pin: GPIO1        # JP1 pin 7
+    sda_pin: GPIO1        # JP1 pin 7: sensor A's bus
     scl_pin: GPIO2        # JP1 pin 9
     frequency: 400kHz     # drop to 100kHz if long wires give read errors
     sample_rate: 250      # readings per second from each sensor
@@ -23,11 +23,13 @@ balancer:
     range: 2              # +/- g
     sensor_a:             # on the bearing nearest the wheel
       address: 0x68       # AD0 left open
-      int_pin: GPIO3      # JP1 pin 11
+      int_pin: GPIO47     # JP1 pin 10
       axis: Z             # through the board: its flat side faces along the motion
     sensor_b:             # on the far bearing; delete this block to run one sensor (single plane)
-      address: 0x69       # AD0 tied to VCC
-      int_pin: GPIO4      # JP1 pin 13
+      sda_pin: GPIO3      # JP1 pin 11: sensor B's own bus (LP I2C, GPIO0..15 only)
+      scl_pin: GPIO4      # JP1 pin 13
+      address: 0x69       # AD0 tied to VCC (on its own bus 0x68 works too: then set 0x68 here)
+      int_pin: GPIO46     # JP1 pin 12
       axis: Z
   tach:
     pin: GPIO32           # JP1 pin 19: LX-101 black wire (NPN open collector), 4.7k to 3V3

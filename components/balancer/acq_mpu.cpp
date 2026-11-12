@@ -100,21 +100,39 @@ void MpuAcquisition::set_invert(int ch, bool invert) {
   invert_[ch].store(invert);
 }
 
-bool MpuAcquisition::setup_i2c_() {
+bool MpuAcquisition::new_bus_(int b, int sda, int scl, bool low_power) {
   i2c_master_bus_config_t bcfg = {};
-  bcfg.i2c_port = cfg_.i2c_port;
-  bcfg.sda_io_num = static_cast<gpio_num_t>(cfg_.pin_sda);
-  bcfg.scl_io_num = static_cast<gpio_num_t>(cfg_.pin_scl);
-  bcfg.clk_source = I2C_CLK_SRC_DEFAULT;
+  bcfg.sda_io_num = static_cast<gpio_num_t>(sda);
+  bcfg.scl_io_num = static_cast<gpio_num_t>(scl);
+  if (low_power) {
+    // The P4's third controller (LP I2C) only reaches GPIO0..15. The two
+    // HP controllers are taken by ESPHome's bus (touch) and sensor A.
+    bcfg.i2c_port = LP_I2C_NUM_0;
+    bcfg.lp_source_clk = LP_I2C_SCLK_DEFAULT;
+  } else {
+    bcfg.i2c_port = cfg_.i2c_port;
+    bcfg.clk_source = I2C_CLK_SRC_DEFAULT;
+  }
   bcfg.glitch_ignore_cnt = 7;
   bcfg.flags.enable_internal_pullup = true;  // the GY-521 boards carry their own pull-ups as well
-  if (i2c_new_master_bus(&bcfg, &bus_) != ESP_OK) {
-    ESP_LOGE(TAG, "I2C bus on SDA GPIO%d / SCL GPIO%d failed", cfg_.pin_sda, cfg_.pin_scl);
+  if (i2c_new_master_bus(&bcfg, &bus_[b]) != ESP_OK) {
+    ESP_LOGE(TAG, "I2C bus %d on SDA GPIO%d / SCL GPIO%d failed%s", b, sda, scl,
+             low_power ? " (the second bus needs pins GPIO0..15)" : "");
     return false;
   }
   // The sensors stay powered through a reboot of the P4 and one may have been
   // cut off mid-transfer, holding SDA low. Clock it free before probing.
-  i2c_master_bus_reset(bus_);
+  i2c_master_bus_reset(bus_[b]);
+  return true;
+}
+
+bool MpuAcquisition::setup_i2c_() {
+  if (!new_bus_(0, cfg_.pin_sda, cfg_.pin_scl, false)) return false;
+  // Sensor B on its own bus keeps a misbehaving sensor from stalling the other.
+  if (cfg_.sensors > 1 && cfg_.pin_sda_b >= 0) {
+    if (!new_bus_(1, cfg_.pin_sda_b, cfg_.pin_scl_b, true)) return false;
+    bus_of_[1] = 1;
+  }
   for (int s = 0; s < cfg_.sensors; s++) {
     // A sensor that doesn't answer yet is still added: the acquisition task
     // keeps clearing the bus and setting it up until it does, so a sensor
@@ -127,7 +145,7 @@ bool MpuAcquisition::setup_i2c_() {
     dcfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dcfg.device_address = cfg_.address[s];
     dcfg.scl_speed_hz = cfg_.i2c_hz;
-    if (i2c_master_bus_add_device(bus_, &dcfg, &dev_[s]) != ESP_OK) {
+    if (i2c_master_bus_add_device(bus_[bus_of_[s]], &dcfg, &dev_[s]) != ESP_OK) {
       ESP_LOGE(TAG, "sensor %c: add device failed", 'A' + s);
       return false;
     }
@@ -139,10 +157,10 @@ bool MpuAcquisition::probe_(int s, int tries) {
   for (int i = 0; i < tries; i++) {
     if (i > 0) {
       // Nine clocks and a STOP release a sensor that is holding SDA low.
-      i2c_master_bus_reset(bus_);
+      i2c_master_bus_reset(bus_[bus_of_[s]]);
       vTaskDelay(pdMS_TO_TICKS(20));
     }
-    if (i2c_master_probe(bus_, cfg_.address[s], 50) == ESP_OK) return true;
+    if (i2c_master_probe(bus_[bus_of_[s]], cfg_.address[s], 50) == ESP_OK) return true;
   }
   return false;
 }
@@ -381,12 +399,25 @@ void MpuAcquisition::task_() {
       if (edge_count_[e.kind].load(std::memory_order_relaxed) != e.count) {
         // The task fell behind and a newer reading has replaced this one.
         missed_++;
+      } else if (fail_streak_[s] >= kFailBackoff && now_ms < next_try_ms_[s]) {
+        // This sensor keeps failing: only try it every kBackoffMs, so its
+        // timeouts can't starve the other sensor.
+        backoff_skips_[s]++;
       } else if (!read_regs_(s, kRegAccelXoutH, b, sizeof(b))) {
         i2c_errors_++;
+        sensor_errors_[s]++;
+        if (++fail_streak_[s] >= kFailBackoff) {
+          next_try_ms_[s] = now_ms + kBackoffMs;
+          if (fail_streak_[s] == kFailBackoff)
+            ESP_LOGW(TAG, "sensor %c: %d reads in a row failed; trying it every %d ms until it answers", 'A' + s,
+                     kFailBackoff, kBackoffMs);
+        }
       } else if (edge_count_[e.kind].load(std::memory_order_relaxed) != e.count) {
         // A new reading landed during the read: no telling which one we got.
         missed_++;
       } else {
+        if (fail_streak_[s] >= kFailBackoff) ESP_LOGI(TAG, "sensor %c: reads working again", 'A' + s);
+        fail_streak_[s] = 0;
         int16_t xyz[3];
         for (int k = 0; k < 3; k++)
           xyz[k] = static_cast<int16_t>((static_cast<uint16_t>(b[2 * k]) << 8) | b[2 * k + 1]);
@@ -461,6 +492,7 @@ void MpuAcquisition::task_() {
             delay_ticks_[c] = static_cast<uint32_t>(delay_s_[c] * static_cast<double>(cap_resolution_) + 0.5);
             ESP_LOGW(TAG, "sensor %c was silent and has been set up again", 'A' + c);
             silent_logged_[c] = false;
+            fail_streak_[c] = 0;
           }
         }
       }
@@ -471,8 +503,11 @@ void MpuAcquisition::task_() {
       status_.dma_overflows.store(missed_ + i2c_errors_);
       status_.glitches.store(analyzer_.glitches());
       if (i2c_errors_ != warned_errors && now_ms - last_warn_ms >= 5000) {
-        ESP_LOGW(TAG, "%u failed sensor reads so far (check the I2C wiring; try a lower frequency)",
-                 (unsigned) i2c_errors_);
+        ESP_LOGW(TAG,
+                 "failed sensor reads so far: A %u, B %u (skipped while backing off: A %u, B %u); check that "
+                 "sensor's wiring, or try a lower frequency",
+                 (unsigned) sensor_errors_[0], (unsigned) sensor_errors_[1], (unsigned) backoff_skips_[0],
+                 (unsigned) backoff_skips_[1]);
         warned_errors = i2c_errors_;
         last_warn_ms = now_ms;
       }

@@ -19,10 +19,12 @@ marked edge (wire 1 = pin 1).
 |---|---|---|
 | 1 or 3 | 3V3 | VCC on both GY-521 boards |
 | 5 | GND | GND on both boards |
-| 7 | GPIO1 | SDA on both boards |
-| 9 | GPIO2 | SCL on both boards |
-| 11 | GPIO3 | INT on sensor A |
-| 13 | GPIO4 | INT on sensor B |
+| 7 | GPIO1 | SDA on sensor A |
+| 9 | GPIO2 | SCL on sensor A |
+| 10 | GPIO47 | INT on sensor A |
+| 11 | GPIO3 | SDA on sensor B |
+| 13 | GPIO4 | SCL on sensor B |
+| 12 | GPIO46 | INT on sensor B |
 | 16 | GND | tach sensor 0 V (LX-101 blue) and the negative of its supply |
 | 18 | 3V3 | top of the tach pull-up resistor |
 | 19 | GPIO32 | tach signal (LX-101 black) |
@@ -35,10 +37,19 @@ On the sensor boards:
 
 - **INT** needs a wire on each board (the hole next to AD0). The firmware
   timestamps every reading from it.
-- **AD0** on sensor B goes to its VCC pin, which moves it to address 0x69.
-  Leave AD0 open on sensor A (0x68).
+- Each sensor has its **own I2C bus** (SDA/SCL pairs above), so one that
+  hangs or fails can't stall the other, and the log names the failing one.
+  Don't join the two buses.
+- **AD0** on sensor B goes to its VCC pin (address 0x69), as set in the YAML.
+  On separate buses both boards could stay at 0x68: change sensor B's
+  `address` in the YAML to match if you leave its AD0 open. Leave AD0 open on
+  sensor A (0x68).
 - XDA and XCL stay unconnected.
-- The boards carry their own I2C pull-ups, so none are needed at the P4.
+- The boards carry their own I2C pull-ups (4.7 kΩ, marked 472, is a good
+  value), so none are needed at the P4.
+- Sensor B's bus has to stay on GPIO0..15: it runs on the P4's low-power I2C
+  controller, the only one left (the touch panel and sensor A use the other
+  two).
 - Keep the sensor leads short, around a metre, and run a ground wire with
   them. If the LIVE screen's "missed readings" count climbs steadily, set
   `frequency: 100kHz` in the YAML.

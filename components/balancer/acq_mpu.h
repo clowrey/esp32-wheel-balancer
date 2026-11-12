@@ -44,7 +44,10 @@ struct AcqStatus {
 
 struct MpuConfig {
   int i2c_port = -1;            // -1: first free port (ESPHome's own bus has port 0)
-  int pin_sda = -1, pin_scl = -1;
+  int pin_sda = -1, pin_scl = -1;  // sensor A's bus (and B's, unless B has its own)
+  // Optional separate bus for sensor B, on the P4's LP I2C controller, which
+  // only reaches GPIO0..15. -1: B shares sensor A's bus.
+  int pin_sda_b = -1, pin_scl_b = -1;
   uint32_t i2c_hz = 400000;
   int sensors = 2;              // 1: sensor A only (single-plane balancing)
   uint8_t address[2] = {0x68, 0x69};
@@ -109,7 +112,9 @@ class MpuAcquisition {
   RevolutionAnalyzer analyzer_;
   QueueHandle_t rev_queue_ = nullptr;
   TaskHandle_t task_handle_ = nullptr;
-  i2c_master_bus_t *bus_ = nullptr;
+  i2c_master_bus_t *bus_[2] = {nullptr, nullptr};
+  int bus_of_[2] = {0, 0};  // which bus each sensor is on
+  bool new_bus_(int b, int sda, int scl, bool low_power);
   i2c_master_dev_t *dev_[2] = {nullptr, nullptr};
   mcpwm_cap_timer_t *cap_timer_ = nullptr;
   mcpwm_cap_channel_t *chan_[3] = {nullptr, nullptr, nullptr};
@@ -127,6 +132,14 @@ class MpuAcquisition {
   uint32_t stat_n_[2] = {0, 0};
   uint32_t missed_ = 0;
   uint32_t i2c_errors_ = 0;
+  uint32_t sensor_errors_[2] = {0, 0};
+  // A sensor that fails kFailBackoff reads in a row is only tried every
+  // kBackoffMs until it answers, so its timeouts can't starve the other one.
+  static constexpr int kFailBackoff = 5;
+  static constexpr int kBackoffMs = 200;
+  int fail_streak_[2] = {0, 0};
+  uint32_t next_try_ms_[2] = {0, 0};
+  uint32_t backoff_skips_[2] = {0, 0};
   bool silent_logged_[2] = {false, false};
 
   // Recent readings of the measured axis (g, polarity applied) for the LIVE

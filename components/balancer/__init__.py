@@ -103,6 +103,11 @@ MPU_SENSOR_SCHEMA = cv.Schema(
         cv.Optional(CONF_AXIS, default="X"): cv.enum(AXES, upper=True),
         # Flip the sign if the board is mounted the other way round (also on the settings screen).
         cv.Optional(CONF_INVERT, default=False): cv.boolean,
+        # Sensor B only: its own I2C bus, so a sensor that hangs or fails
+        # can't stall the other. It runs on the P4's LP I2C controller, which
+        # only reaches GPIO0..15. Leave both out to share sensor A's bus.
+        cv.Optional(CONF_SDA_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_SCL_PIN): pins.internal_gpio_output_pin_number,
     }
 )
 
@@ -133,7 +138,26 @@ def _check_mpu(config):
         )
     # Each reading is an 85-clock I2C transfer that has to finish well before
     # the next reading is due, or it cannot be tied to its timestamp.
-    sensors = 2 if CONF_SENSOR_B in mpu else 1
+    for key in (CONF_SDA_PIN, CONF_SCL_PIN):
+        if key in mpu[CONF_SENSOR_A]:
+            raise cv.Invalid(
+                f"sensor_a uses the bus pins set above; '{key}' is only for sensor_b", path=[CONF_MPU6050, CONF_SENSOR_A, key]
+            )
+    own_bus = False
+    if CONF_SENSOR_B in mpu:
+        b = mpu[CONF_SENSOR_B]
+        if (CONF_SDA_PIN in b) != (CONF_SCL_PIN in b):
+            raise cv.Invalid("set both sda_pin and scl_pin for sensor_b, or neither", path=[CONF_MPU6050, CONF_SENSOR_B])
+        own_bus = CONF_SDA_PIN in b
+        if own_bus:
+            for key in (CONF_SDA_PIN, CONF_SCL_PIN):
+                if b[key] > 15:
+                    raise cv.Invalid(
+                        f"sensor_b's own bus runs on the P4's LP I2C controller, which only reaches GPIO0..15 "
+                        f"(GPIO{b[key]} given)",
+                        path=[CONF_MPU6050, CONF_SENSOR_B, key],
+                    )
+    sensors = 2 if CONF_SENSOR_B in mpu and not own_bus else 1  # sensors sharing one bus
     busy = sensors * 85.0 / mpu[CONF_FREQUENCY] * mpu[CONF_SAMPLE_RATE]
     if busy > 0.5:
         raise cv.Invalid(
@@ -141,7 +165,11 @@ def _check_mpu(config):
             f"{int(mpu[CONF_FREQUENCY] / 1000)} kHz: raise 'frequency' or lower 'sample_rate'",
             path=[CONF_MPU6050, CONF_SAMPLE_RATE],
         )
-    if CONF_SENSOR_B in mpu and mpu[CONF_SENSOR_B][CONF_ADDRESS] == mpu[CONF_SENSOR_A][CONF_ADDRESS]:
+    if (
+        CONF_SENSOR_B in mpu
+        and not own_bus
+        and mpu[CONF_SENSOR_B][CONF_ADDRESS] == mpu[CONF_SENSOR_A][CONF_ADDRESS]
+    ):
         raise cv.Invalid(
             "sensor_a and sensor_b need different addresses (tie AD0 high on one board for 0x69)",
             path=[CONF_MPU6050, CONF_SENSOR_B, CONF_ADDRESS],
@@ -224,6 +252,8 @@ async def to_code(config):
                     idx, int(sens[CONF_ADDRESS]), sens[CONF_INT_PIN], AXES[str(sens[CONF_AXIS])], sens[CONF_INVERT]
                 )
             )
+            if CONF_SDA_PIN in sens:
+                cg.add(var.set_mpu_bus_b(sens[CONF_SDA_PIN], sens[CONF_SCL_PIN]))
 
     for key, setter in (
         (CONF_RPM, "set_rpm_sensor"),

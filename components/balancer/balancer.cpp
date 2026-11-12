@@ -204,6 +204,9 @@ void BalancerComponent::dump_config() {
   static const char kAxis[] = "XYZ";
   ESP_LOGCONFIG(TAG, "  Sensors: MPU-6050 family on I2C, SDA GPIO%d, SCL GPIO%d, %u Hz", mpu_cfg_.pin_sda,
                 mpu_cfg_.pin_scl, (unsigned) mpu_cfg_.i2c_hz);
+  if (mpu_cfg_.sensors > 1 && mpu_cfg_.pin_sda_b >= 0)
+    ESP_LOGCONFIG(TAG, "  Sensor B on its own bus (LP I2C): SDA GPIO%d, SCL GPIO%d", mpu_cfg_.pin_sda_b,
+                  mpu_cfg_.pin_scl_b);
   ESP_LOGCONFIG(TAG, "  Readings: %u Hz, %d Hz low-pass, +/-%d g", (unsigned) mpu_cfg_.sample_rate, mpu_cfg_.filter_hz,
                 mpu_cfg_.range_g);
   for (int c = 0; c < mpu_cfg_.sensors; c++) {

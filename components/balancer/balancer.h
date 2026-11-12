@@ -39,6 +39,10 @@ class BalancerComponent : public Component, public bal::ModelCore {
   void set_task_core(int core) { mpu_cfg_.task_core = core; }
   void set_mpu_bus(int sda, int scl, int frequency, int sample_rate, int filter_hz, int range_g);
   void set_mpu_sensor(int ch, int address, int int_pin, int axis, bool invert);
+  void set_mpu_bus_b(int sda, int scl) {
+    mpu_cfg_.pin_sda_b = sda;
+    mpu_cfg_.pin_scl_b = scl;
+  }
   void set_max_speed_change(float fraction) { max_speed_change_ = fraction; }
   void set_rpm_sensor(sensor::Sensor *s) { rpm_sensor_ = s; }
   void set_amp_sensor_a(sensor::Sensor *s) { amp_sensor_[0] = s; }
