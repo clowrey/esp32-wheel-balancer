@@ -28,16 +28,17 @@ python render_preview.py
 
 ## What the case has
 
-- Overall 211.80 x 113.72 x 35.4 mm with the default settings (181.80 wide
-  without the tabs): 31.2 mm behind the standoff plane plus a 4.2 mm lip
+- Overall 211.80 x 113.72 x 36.2 mm with the default settings (181.80 wide
+  without the tabs): 31.2 mm behind the standoff plane plus a 5.0 mm lip
   forward of it. Display plus case is about 44 mm deep.
 - Four corner bosses at 166.00 x 99.00 mm, tied into the corner walls. A 2.4 mm
   M2 through hole with a 4.6 mm counterbore from the back, leaving a 4 mm
   floor. An M2 x 8 screw from the back then has about 4 mm in the standoff. A
   long screwdriver reaches down the counterbore.
 - Front lip, 1.6 mm thick, that carries the wall forward from the standoff
-  tops to 0.8 mm short of the back face of the plastic bezel, so the edge gap
-  is closed. With `--overhang` of 2 mm or more the lip instead wraps the bezel
+  tops to the back face of the plastic bezel (5 mm), so the case meets the
+  bezel with no gap. If a print comes out long and the case rocks, set
+  `lip_gap_to_bezel` to 0.3. With `--overhang` of 2 mm or more the lip instead wraps the bezel
   and ends flush with the glass front.
 - Mounting tabs on the left and right: 5 mm thick, 15 mm out from the wall,
   91 mm long (80% of the case height), flush with the back face, each with

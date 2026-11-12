@@ -101,7 +101,7 @@ class CaseParams:
     # bezel edge and ends flush with the glass front.
     lip: bool = True
     lip_thk: float = 1.6
-    lip_gap_to_bezel: float = 0.8      # flush case: air gap left before the bezel's back face
+    lip_gap_to_bezel: float = 0.0      # flush case: gap left before the bezel's back face (0 = lip touches it)
     wrap_clearance: float = 0.4        # overhang case: gap round the glass edge
     # Mounting screws, from the back into the display standoffs (M2, confirmed).
     hole_d: float = 2.4                # M2 clearance
