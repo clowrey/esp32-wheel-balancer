@@ -33,7 +33,12 @@ constexpr uint8_t kRegPwrMgmt1 = 0x6B;
 constexpr uint8_t kRegPwrMgmt2 = 0x6C;
 constexpr uint8_t kRegWhoAmI = 0x75;
 
-constexpr int kI2cTimeoutMs = 5;
+// A 6-byte read takes about 0.2 ms at 400 kHz, so this only expires when the
+// bus is in trouble. Keep it generous: when ESP-IDF's i2c_master gives up on a
+// transfer, a late receive interrupt can still land and write through a stale
+// pointer (seen on the P4 as a store access fault in i2c_isr_receive_handler,
+// which rebooted the board while a sensor's wiring was flaky).
+constexpr int kI2cTimeoutMs = 50;
 
 // Low-pass choices: DLPF_CFG value and the accelerometer's group delay,
 // which is removed from the phase. The MPU-6050
