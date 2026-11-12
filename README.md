@@ -1,10 +1,10 @@
-# P4 Balancer
+# ESP32 Wheel Balancer
 
 Two-plane dynamic balancer for car wheels on the Guition JC1060P470C
 (ESP32-P4, 7" 1024×600 touchscreen). Two GY-521 (MPU-6050) accelerometers
 on I²C and an optical tach in; "add 12.4 g at 137°" out, drawn on rotor
 dials on the LCD. The wheel sits on a soft leaf-spring rig and is spun by
-hand. Wiring and rig notes: [docs/hardware/tire-rig.md](docs/hardware/tire-rig.md).
+hand.
 
 ![Correction screen](docs/ui/07_result.png)
 
@@ -15,8 +15,54 @@ hand. Wiring and rig notes: [docs/hardware/tire-rig.md](docs/hardware/tire-rig.m
 | Board bring-up | display, touch and Wi-Fi run on the board |
 | DSP + balancing math | done: host tests, simulator exit tests, pyPRB cross-check |
 | Touchscreen UI | done: all screens, previewed on PC ([docs/ui](docs/ui)) |
-| MPU-6050 acquisition | written and simulated end to end; bench test on the sensor PCB in progress |
+| MPU-6050 acquisition | simulated end to end; both sensors read on the bench; two-bus rewire pending; not yet run on a spinning wheel |
 | Persistence / export | settings, wheel setup and saved machine in flash; HA sensors |
+
+## Hardware
+
+> The two-bus wiring below is new (2026-11-12) and the rig has **not yet been
+> validated on a spinning wheel**. Treat it as a build guide in progress.
+
+| Part | What | Notes |
+|---|---|---|
+| Controller | Guition JC1060P470C_I_W_Y (ESP32-P4, 7" 1024×600 touch LCD) | powered from its USB-C port |
+| Sensors | 2× GY-521 (MPU-6050) | A at 0x68 (AD0 open), B at 0x69 (AD0 to VCC); 4.7 kΩ (472) pull-ups on each board; one per bearing housing |
+| Tach | Panasonic LX-101 mark sensor | own 12–24 V supply, NPN open-collector output pulled up to 3.3 V |
+| Tach teach (optional) | NPN transistor (2N3904, BC547) + 1 kΩ | lets the screen's TEACH TACH button drive the LX-101's teach input |
+| Case | 3D-printable rear case | build123d source and STEP in [`hardware/display_case/`](hardware/display_case/) |
+| Rig | wheel spindle on a leaf spring | soft rig, sway resonance well below spin speed; spun by hand |
+
+### Wiring (JP1, 26-pin header on the back of the board)
+
+![JP1 wiring, viewed from the back of the board](docs/hardware/jp1-tire-wiring.png)
+
+Each sensor has its own I²C bus, so one that hangs can't stall the other:
+
+| JP1 pin | GPIO | Connects to |
+|---|---|---|
+| 1 | 3V3 | VCC, both GY-521 boards |
+| 5 | GND | GND, both GY-521 boards |
+| 7 / 9 | GPIO1 / GPIO2 | sensor A SDA / SCL (bus 1) |
+| 10 | GPIO47 | sensor A INT |
+| 11 / 13 | GPIO3 / GPIO4 | sensor B SDA / SCL (bus 2, the P4's LP I²C port) |
+| 12 | GPIO46 | sensor B INT |
+| 16 | GND | LX-101 blue (0 V) and its supply negative |
+| 17 | GPIO20 | tach teach: 1 kΩ to the NPN base; collector to LX-101 pink |
+| 18 | 3V3 | 4.7 kΩ tach pull-up, other end to pin 19 |
+| 19 | GPIO32 | LX-101 black (tach output) |
+
+- Wire INT on both boards; every reading is timestamped from it. Leave XDA and XCL open.
+- LX-101 brown (+12–24 V) goes to its own supply only, **never** to the header.
+  Never wire pink straight to a GPIO (it sits at 5 V); use the transistor.
+- Leave pins 2 and 4 (VOUT-BAT), GPIO5 (LCD reset) and the onboard I²C pins 23/25 unconnected.
+- Mount each sensor flat against a vertical face of its bearing housing. The
+  firmware reads the Z axis, through the board; face both boards the same way
+  (or flip "Sensor B polarity" in Settings).
+
+All pins are set in `balancer-tire.yaml`. Full details (LX-101 teaching,
+mounting, rig tuning, procedure) are in
+[docs/hardware/tire-rig.md](docs/hardware/tire-rig.md); the full header and
+onboard pin map is in [docs/hardware/pinout.md](docs/hardware/pinout.md).
 
 ## Flashing
 
@@ -59,7 +105,8 @@ or `esptool.py write_flash 0x0 <file>`, then use `.ota.bin` files or
 - `tests/`: host tests (`cmake -S tests -B build/tests && ctest --test-dir build/tests`)
 - `tools/ui_preview/`: renders every screen on a PC
 - `tools/crosscheck_pyprb.py`: solver cross-check against pyPRB
-- `docs/hardware/`: pinout (JP1), tire rig, schematic
+- `docs/hardware/`: pinout (JP1), wiring image, tire rig, schematic
+- `hardware/display_case/`: 3D-printable rear case (build123d, STEP)
 
 ## License
 The firmware, tools and docs in this repo are MIT licensed (see `LICENSE`).
