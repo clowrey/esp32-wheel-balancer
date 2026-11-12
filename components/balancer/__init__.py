@@ -10,6 +10,19 @@ balancer:
   channel_b: {sensitivity: 100, gain: 10}
   simulate: false
   rpm: {name: "Rotor RPM"}
+
+Digital sensors instead of the PCM1808 (tires on a soft rig, see
+docs/hardware/tire-rig.md):
+
+balancer:
+  preset: tire
+  sensor_type: mpu6050
+  mpu6050:
+    sda_pin: GPIO1
+    scl_pin: GPIO2
+    sensor_a: {address: 0x68, int_pin: GPIO3, axis: X}
+    sensor_b: {address: 0x69, int_pin: GPIO4, axis: X}   # leave out for one sensor
+  tach: {pin: GPIO32, edge: RISING}
 """
 
 import esphome.codegen as cg
@@ -56,6 +69,24 @@ CONF_AMPLITUDE_B = "amplitude_b"
 CONF_PHASE_A = "phase_a"
 CONF_PHASE_B = "phase_b"
 CONF_TASK_CORE = "task_core"
+CONF_SENSOR_TYPE = "sensor_type"
+CONF_MPU6050 = "mpu6050"
+CONF_SDA_PIN = "sda_pin"
+CONF_SCL_PIN = "scl_pin"
+CONF_FREQUENCY = "frequency"
+CONF_FILTER = "filter"
+CONF_RANGE = "range"
+CONF_SENSOR_A = "sensor_a"
+CONF_SENSOR_B = "sensor_b"
+CONF_ADDRESS = "address"
+CONF_INT_PIN = "int_pin"
+CONF_AXIS = "axis"
+CONF_PRESET = "preset"
+CONF_MAX_SPEED_CHANGE = "max_speed_change"
+
+SENSOR_TYPES = ("pcm1808", "mpu6050")
+PRESETS = {"motor_rotor": 0, "tire": 1}
+AXES = {"X": 0, "Y": 1, "Z": 2}
 
 # LVGL builds only the widgets and fonts the YAML uses. The UI is written in
 # C++, so register what it needs during validation (before lvgl's codegen).
@@ -108,6 +139,59 @@ TACH_SCHEMA = cv.Schema(
     }
 )
 
+MPU_SENSOR_SCHEMA = cv.Schema(
+    {
+        cv.Required(CONF_ADDRESS): cv.i2c_address,
+        cv.Required(CONF_INT_PIN): pins.internal_gpio_input_pin_number,
+        # The sensor axis that points along the motion being measured.
+        cv.Optional(CONF_AXIS, default="X"): cv.enum(AXES, upper=True),
+    }
+)
+
+# One or two MPU-6050-family accelerometers on their own I2C bus (not the
+# board's touch bus: this one is read from the acquisition task).
+MPU6050_SCHEMA = cv.Schema(
+    {
+        cv.Required(CONF_SDA_PIN): pins.internal_gpio_output_pin_number,
+        cv.Required(CONF_SCL_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_FREQUENCY, default="400kHz"): cv.All(cv.frequency, cv.int_range(min=50000, max=400000)),
+        # Readings per second (the chip divides 1 kHz) and its low-pass filter.
+        cv.Optional(CONF_SAMPLE_RATE, default=250): cv.one_of(50, 100, 125, 200, 250, 500, 1000, int=True),
+        cv.Optional(CONF_FILTER, default="44Hz"): cv.All(cv.frequency, cv.one_of(5, 10, 21, 44, 94, 184, int=True)),
+        cv.Optional(CONF_RANGE, default=2): cv.one_of(2, 4, 8, 16, int=True),  # +/- g
+        cv.Required(CONF_SENSOR_A): MPU_SENSOR_SCHEMA,
+        cv.Optional(CONF_SENSOR_B): MPU_SENSOR_SCHEMA,
+    }
+)
+
+
+def _check_sensor_type(config):
+    if config[CONF_SENSOR_TYPE] == "mpu6050":
+        if CONF_MPU6050 not in config:
+            raise cv.Invalid("sensor_type: mpu6050 needs an 'mpu6050:' block with the bus and sensor pins")
+        mpu = config[CONF_MPU6050]
+        if 2 * mpu[CONF_FILTER] > mpu[CONF_SAMPLE_RATE]:
+            raise cv.Invalid(
+                f"filter {mpu[CONF_FILTER]} Hz is too wide for {mpu[CONF_SAMPLE_RATE]} readings per second "
+                "(keep it at or below half the sample rate)",
+                path=[CONF_MPU6050, CONF_FILTER],
+            )
+        if CONF_SENSOR_B in mpu and mpu[CONF_SENSOR_B][CONF_ADDRESS] == mpu[CONF_SENSOR_A][CONF_ADDRESS]:
+            raise cv.Invalid(
+                "sensor_a and sensor_b need different addresses (tie AD0 high on one board for 0x69)",
+                path=[CONF_MPU6050, CONF_SENSOR_B, CONF_ADDRESS],
+            )
+        if CONF_I2S in config:
+            raise cv.Invalid("'i2s:' belongs to the PCM1808; remove it when sensor_type is mpu6050", path=[CONF_I2S])
+    else:
+        if CONF_MPU6050 in config:
+            raise cv.Invalid("an 'mpu6050:' block is only used with sensor_type: mpu6050", path=[CONF_MPU6050])
+        if CONF_I2S not in config:
+            config = dict(config)
+            config[CONF_I2S] = I2S_SCHEMA({})
+    return config
+
+
 _amp = sensor.sensor_schema(accuracy_decimals=3, state_class=STATE_CLASS_MEASUREMENT)
 _phase = sensor.sensor_schema(unit_of_measurement="°", accuracy_decimals=1, state_class=STATE_CLASS_MEASUREMENT)
 
@@ -115,7 +199,9 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(BalancerComponent),
-            cv.Optional(CONF_I2S, default={}): I2S_SCHEMA,
+            # Defaults are filled in by _check_sensor_type (PCM1808 only), so the
+            # I2S pins are not claimed when digital sensors are used.
+            cv.Optional(CONF_I2S): I2S_SCHEMA,
             cv.Optional(CONF_LRCK_CAPTURE_PIN, default=-1): cv.Any(
                 cv.int_range(-1, -1), pins.internal_gpio_input_pin_number
             ),
@@ -127,6 +213,12 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ADC_DELAY, default=1087.5): cv.float_range(min=0, max=100000),  # PCM1808: 17.4/fs
             cv.Optional(CONF_SIMULATE, default=False): cv.boolean,
             cv.Optional(CONF_TASK_CORE, default=1): cv.int_range(0, 1),
+            cv.Optional(CONF_SENSOR_TYPE, default="pcm1808"): cv.one_of(*SENSOR_TYPES, lower=True),
+            cv.Optional(CONF_MPU6050): MPU6050_SCHEMA,
+            # Starting values for the kind of rotor (all still editable on the screen).
+            cv.Optional(CONF_PRESET, default="motor_rotor"): cv.enum(PRESETS, lower=True),
+            # Largest speed change from one revolution to the next that still counts.
+            cv.Optional(CONF_MAX_SPEED_CHANGE): cv.percentage,
             cv.Optional(CONF_RPM): sensor.sensor_schema(
                 unit_of_measurement="rpm",
                 icon="mdi:rotate-right",
@@ -140,6 +232,7 @@ CONFIG_SCHEMA = cv.All(
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_on_esp32,
+    _check_sensor_type,
     _register_lvgl_needs,
 )
 
@@ -148,9 +241,10 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    i2s = config[CONF_I2S]
-    cg.add(var.set_i2s(i2s[CONF_PORT], i2s[CONF_MCLK_PIN], i2s[CONF_BCLK_PIN], i2s[CONF_LRCLK_PIN],
-                       i2s[CONF_DIN_PIN], i2s[CONF_SAMPLE_RATE], i2s[CONF_USE_APLL]))
+    if CONF_I2S in config:
+        i2s = config[CONF_I2S]
+        cg.add(var.set_i2s(i2s[CONF_PORT], i2s[CONF_MCLK_PIN], i2s[CONF_BCLK_PIN], i2s[CONF_LRCLK_PIN],
+                           i2s[CONF_DIN_PIN], i2s[CONF_SAMPLE_RATE], i2s[CONF_USE_APLL]))
     cg.add(var.set_lrck_capture_pin(config[CONF_LRCK_CAPTURE_PIN]))
     tach = config[CONF_TACH]
     cg.add(var.set_tach(tach[CONF_PIN], tach[CONF_EDGE] == "FALLING", tach[CONF_PULLUP]))
@@ -162,6 +256,25 @@ async def to_code(config):
     cg.add(var.set_adc_delay_us(config[CONF_ADC_DELAY]))
     cg.add(var.set_simulate(config[CONF_SIMULATE]))
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
+    cg.add(var.set_preset(PRESETS[str(config[CONF_PRESET])]))
+    if CONF_MAX_SPEED_CHANGE in config:
+        cg.add(var.set_max_speed_change(config[CONF_MAX_SPEED_CHANGE]))
+    if config[CONF_SENSOR_TYPE] == "mpu6050":
+        mpu = config[CONF_MPU6050]
+        cg.add(
+            var.set_mpu_bus(
+                mpu[CONF_SDA_PIN],
+                mpu[CONF_SCL_PIN],
+                int(mpu[CONF_FREQUENCY]),
+                mpu[CONF_SAMPLE_RATE],
+                int(mpu[CONF_FILTER]),
+                mpu[CONF_RANGE],
+            )
+        )
+        for idx, key in enumerate((CONF_SENSOR_A, CONF_SENSOR_B)):
+            if key in mpu:
+                sens = mpu[key]
+                cg.add(var.set_mpu_sensor(idx, int(sens[CONF_ADDRESS]), sens[CONF_INT_PIN], AXES[str(sens[CONF_AXIS])]))
 
     for key, setter in (
         (CONF_RPM, "set_rpm_sensor"),

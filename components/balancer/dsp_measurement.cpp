@@ -174,6 +174,10 @@ MeasureStats Measurement::stats() const {
     }
   }
   s.ready = n >= cfg_.target_revs && all_settled;
+  if (!s.ready && cfg_.best_effort_factor > 0 && n >= cfg_.best_effort_factor * cfg_.target_revs) {
+    s.ready = true;
+    s.best_effort = true;
+  }
   return s;
 }
 

@@ -1,6 +1,7 @@
 // Renders every screen of the balancer UI to images on a PC, driving the
 // whole wizard with the demo rotor (same ModelCore + BalancerUi code as the
-// firmware). Output: PPM files in the directory given as argv[1].
+// firmware). Output: PPM files in the directory given as argv[1]. Pass "tire"
+// as argv[2] to run the same script with the tire preset.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -17,6 +18,8 @@ static uint8_t g_draw[W * H * 2];
 static uint32_t g_now = 1;
 static lv_display_t *g_disp;
 static std::string g_out;
+static std::string g_prefix;      // file name prefix ("tire_" for the tire preset)
+static double g_lock_rpm = 1500;  // speed at which the script taps LOCK SPEED
 
 static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px) {
   const int w = a->x2 - a->x1 + 1;
@@ -29,7 +32,7 @@ static uint32_t tick_cb() { return g_now; }
 static void render(const char *name) {
   lv_obj_invalidate(lv_screen_active());
   lv_refr_now(g_disp);
-  std::string path = g_out + "/" + name + ".ppm";
+  std::string path = g_out + "/" + g_prefix + name + ".ppm";
   FILE *f = std::fopen(path.c_str(), "wb");
   std::fprintf(f, "P6\n%d %d\n255\n", W, H);
   for (int i = 0; i < W * H; i++) {
@@ -59,10 +62,10 @@ static void do_run(ModelCore &m, BalancerUi &ui, const char *mid_shot) {
   for (int pass = 0; pass < 30 && !m.run_stats().ready; pass++) {
     m.sim_blast();
     advance(m, ui, 0.3);  // let the speed readout catch up with the blast
-    const double T = m.job().test_rpm() > 0 ? m.job().test_rpm() : 1500;
+    const double T = m.job().test_rpm() > 0 ? m.job().test_rpm() : g_lock_rpm;
     while (m.live().rpm == 0 || m.live().rpm > T * 0.95) {
       advance(m, ui, 0.1);
-      if (m.job().test_rpm() <= 0 && m.live().rpm > 0 && m.live().rpm <= 1500) m.lock_speed(0);  // LOCK SPEED
+      if (m.job().test_rpm() <= 0 && m.live().rpm > 0 && m.live().rpm <= g_lock_rpm) m.lock_speed(0);  // LOCK SPEED
       if (mid_shot != nullptr && m.run_stats().revs >= 12) {
         render(mid_shot);
         mid_shot = nullptr;
@@ -83,6 +86,13 @@ int main(int argc, char **argv) {
 
   ModelCore m;
   m.set_simulate(true);
+  if (argc > 2 && std::strcmp(argv[2], "tire") == 0) {
+    // Same script with the tire preset and digital sensors (balancer-tire.yaml).
+    m.apply_preset(Preset::TIRE);
+    m.set_digital_sensor(true);
+    g_prefix = "tire_";
+    g_lock_rpm = 245;
+  }
   BalancerUi ui;
   ui.build(&m);
   advance(m, ui, 0.2);

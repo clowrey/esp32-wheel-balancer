@@ -37,6 +37,13 @@ struct UiSettings {
   double max_phase_unc_deg = 2.0;
 };
 
+// Starting values for a kind of work. Everything in JobConfig and UiSettings
+// can still be changed on the screen afterwards.
+enum class Preset : uint8_t {
+  MOTOR_ROTOR = 0,  // 1 hp motor rotor on a stand, air driven (PLAN §6.1)
+  TIRE = 1,         // car wheel on a soft (leaf spring) rig, spun by hand, MEMS sensors
+};
+
 class UiModel {
  public:
   virtual ~UiModel() = default;
@@ -64,6 +71,10 @@ class UiModel {
   virtual void save_machine() = 0;
   virtual bool start_trim() = 0;
   virtual std::string machine_summary() const = 0;
+
+  // Digital sensors (MPU-6050): readings arrive in g, so there is no
+  // sensitivity or front-end gain to set.
+  virtual bool digital_sensor() const { return false; }
 
   // Demo mode with the simulated rotor.
   virtual bool simulate() const = 0;

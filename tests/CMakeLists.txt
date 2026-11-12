@@ -14,14 +14,16 @@ set(DSP_SOURCES
   ${COMP}/dsp_balance.cpp
   ${COMP}/dsp_job.cpp
   ${COMP}/dsp_timebase.cpp
+  ${COMP}/dsp_resample.cpp
   ${COMP}/dsp_sim.cpp
+  ${COMP}/ui_core.cpp   # ModelCore: pure C++, shared with the firmware and ui_preview
 )
 
 add_library(balancer_dsp STATIC ${DSP_SOURCES})
 target_include_directories(balancer_dsp PUBLIC ${COMP})
 target_compile_options(balancer_dsp PRIVATE -Wall -Wextra -Werror)
 
-add_executable(test_dsp test_dsp.cpp)
+add_executable(test_dsp test_dsp.cpp test_mpu.cpp)
 target_include_directories(test_dsp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_dsp balancer_dsp)
 

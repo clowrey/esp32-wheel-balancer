@@ -1,0 +1,46 @@
+# Tire balancer: same board and touchscreen as balancer-jc1060p470.yaml, but
+# with two GY-521 (MPU-6050) boards on I2C in place of the PCM1808 front end,
+# and starting values for a car wheel on a soft leaf-spring rig.
+# Wiring and rig notes: docs/hardware/tire-rig.md
+substitutions:
+  name: balancer-tire
+  friendly_name: Tire Balancer
+  simulate: "false"
+
+packages:
+  common: !include balancer-common.yaml
+
+balancer:
+  id: rotor_balancer
+  simulate: ${simulate}
+  preset: tire
+  sensor_type: mpu6050
+  mpu6050:
+    sda_pin: GPIO1        # JP1 pin 7
+    scl_pin: GPIO2        # JP1 pin 9
+    frequency: 400kHz     # drop to 100kHz if long wires give read errors
+    sample_rate: 250      # readings per second from each sensor
+    filter: 44Hz          # the sensor's own low-pass
+    range: 2              # +/- g
+    sensor_a:             # on the bearing nearest the wheel
+      address: 0x68       # AD0 left open
+      int_pin: GPIO3      # JP1 pin 11
+      axis: X
+    sensor_b:             # on the far bearing; delete this block to run one sensor (single plane)
+      address: 0x69       # AD0 tied to VCC
+      int_pin: GPIO4      # JP1 pin 13
+      axis: X
+  tach:
+    pin: GPIO32           # JP1 pin 19, one 3.3 V pulse per revolution
+    edge: RISING
+    pullup: true
+  rpm:
+    name: "Wheel speed"
+  amplitude_a:
+    name: "Bearing A 1x"
+  amplitude_b:
+    name: "Bearing B 1x"
+  phase_a:
+    name: "Bearing A phase"
+  phase_b:
+    name: "Bearing B phase"

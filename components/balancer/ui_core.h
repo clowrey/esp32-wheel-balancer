@@ -24,6 +24,19 @@ class ModelCore : public UiModel {
   void tick(uint32_t now_ms);
 
   void set_simulate(bool on) { simulate_ = on; }
+  // Load the starting values for a kind of work (job, measurement settings,
+  // wording). Call before restoring anything saved.
+  void apply_preset(Preset p);
+  Preset preset() const { return preset_; }
+  void set_digital_sensor(bool on) { digital_sensor_ = on; }
+  // Largest revolution-to-revolution speed change a revolution may have and
+  // still count (fraction of the period).
+  void set_max_period_change(double f) { max_period_change_ = f; }
+  void set_best_effort_factor(int n) { best_effort_factor_ = n; }
+  // How well a reading has to be known before it counts as settled even
+  // though its phase is not (a balanced rotor has no phase), as a
+  // displacement in um. 0 keeps the per-unit defaults.
+  void set_amp_floor_um(double um) { amp_floor_um_ = um; }
   LiveData &live_mut() { return live_; }
   void load_machine(const InfluenceModel &m, double rpm, const JobConfig &cfg) {
     machine_ = m;
@@ -53,6 +66,7 @@ class ModelCore : public UiModel {
   void save_machine() override;
   bool start_trim() override;
   std::string machine_summary() const override;
+  bool digital_sensor() const override { return digital_sensor_; }
   bool simulate() const override { return simulate_; }
   void sim_blast() override;
 
@@ -92,6 +106,12 @@ class ModelCore : public UiModel {
   InfluenceModel machine_;
   double machine_rpm_ = 0;
   JobConfig machine_cfg_;
+
+  Preset preset_ = Preset::MOTOR_ROTOR;
+  bool digital_sensor_ = false;
+  double max_period_change_ = 0.01;
+  int best_effort_factor_ = 0;
+  double amp_floor_um_ = 0;
 
   bool simulate_ = false;
   RevSim sim_;

@@ -1,0 +1,11 @@
+# Bench demo of the tire balancer: same firmware as balancer-tire.yaml with a
+# simulated wheel in place of the sensors. No MPU-6050s or tach needed. Walk
+# the whole procedure on the touchscreen (SPIN, LOCK SPEED, trial weights,
+# correction, verify) before the rig exists.
+substitutions:
+  name: balancer-tire-demo
+  friendly_name: Tire Balancer Demo
+  simulate: "true"
+
+packages:
+  balancer: !include balancer-tire.yaml

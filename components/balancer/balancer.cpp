@@ -25,6 +25,28 @@ void BalancerComponent::set_tach(int pin, bool falling, bool pullup) {
   acq_cfg_.pin_tach = pin;
   acq_cfg_.tach_falling = falling;
   acq_cfg_.tach_pullup = pullup;
+  mpu_cfg_.pin_tach = pin;
+  mpu_cfg_.tach_falling = falling;
+  mpu_cfg_.tach_pullup = pullup;
+}
+
+void BalancerComponent::set_mpu_bus(int sda, int scl, int frequency, int sample_rate, int filter_hz, int range_g) {
+  use_mpu_ = true;
+  mpu_cfg_.pin_sda = sda;
+  mpu_cfg_.pin_scl = scl;
+  mpu_cfg_.i2c_hz = frequency;
+  mpu_cfg_.sample_rate = sample_rate;
+  mpu_cfg_.filter_hz = filter_hz;
+  mpu_cfg_.range_g = range_g;
+  mpu_cfg_.sensors = 0;
+}
+
+void BalancerComponent::set_mpu_sensor(int ch, int address, int int_pin, int axis) {
+  if (ch < 0 || ch > 1) return;
+  mpu_cfg_.address[ch] = static_cast<uint8_t>(address);
+  mpu_cfg_.pin_int[ch] = int_pin;
+  mpu_cfg_.axis[ch] = axis;
+  if (mpu_cfg_.sensors < ch + 1) mpu_cfg_.sensors = ch + 1;
 }
 
 void BalancerComponent::set_channel_default(int ch, float sens_mv_g, float gain, bool invert) {
@@ -38,7 +60,15 @@ void BalancerComponent::set_channel_default(int ch, float sens_mv_g, float gain,
 }
 
 void BalancerComponent::setup() {
-  pref_ = global_preferences->make_preference<SavedState>(fnv1_hash("balancer_state"));
+  // Starting values for this kind of work, then whatever was saved on top.
+  // Each preset has its own slot in flash, so switching firmware between a
+  // motor rotor and a tire never mixes their settings.
+  set_digital_sensor(use_mpu_);
+  if (use_mpu_ && mpu_cfg_.sensors < 2) job_.set_max_planes(1);
+  apply_preset(preset_);
+  if (max_speed_change_ > 0) set_max_period_change(max_speed_change_);
+  pref_ = global_preferences->make_preference<SavedState>(
+      fnv1_hash(preset_ == bal::Preset::TIRE ? "balancer_state_tire" : "balancer_state"));
   if (pref_.load(&saved_) && saved_.magic == kStateMagic) {
     settings_ = saved_.settings;
     job_.reset(saved_.job);
@@ -49,14 +79,21 @@ void BalancerComponent::setup() {
     acq_cfg_.sensitivity_mv_g[c] = settings_.sens_mv_g[c];
     acq_cfg_.gain[c] = settings_.gain[c];
     acq_cfg_.invert[c] = settings_.invert[c];
+    mpu_cfg_.invert[c] = settings_.invert[c];
   }
   configure_measurement_();
 
 #ifdef USE_ESP32
   if (!simulate_) {
-    acq_started_ = acq_.start(acq_cfg_);
+    if (use_mpu_) {
+      mpu_ = std::make_unique<bal::MpuAcquisition>();
+      acq_started_ = mpu_->start(mpu_cfg_);
+    } else {
+      acq_ = std::make_unique<bal::Acquisition>();
+      acq_started_ = acq_->start(acq_cfg_);
+    }
     if (!acq_started_) {
-      ESP_LOGE(TAG, "acquisition failed to start (check the I2S/tach pins)");
+      ESP_LOGE(TAG, "acquisition failed to start (check the %s and tach pins)", use_mpu_ ? "sensor wiring" : "I2S");
       this->status_set_error(LOG_STR("acquisition failed"));
     }
   }
@@ -65,8 +102,19 @@ void BalancerComponent::setup() {
 
 void BalancerComponent::on_settings_changed() {
 #ifdef USE_ESP32
-  for (int c = 0; c < 2; c++) acq_.set_channel(c, settings_.sens_mv_g[c], settings_.gain[c], settings_.invert[c]);
+  for (int c = 0; c < 2; c++) {
+    if (mpu_) mpu_->set_invert(c, settings_.invert[c]);
+    if (acq_) acq_->set_channel(c, settings_.sens_mv_g[c], settings_.gain[c], settings_.invert[c]);
+  }
 #endif
+}
+
+bool BalancerComponent::acq_pop_(bal::RevResult &out) {
+#ifdef USE_ESP32
+  if (mpu_) return mpu_->pop(out);
+  if (acq_) return acq_->pop(out);
+#endif
+  return false;
 }
 
 void BalancerComponent::save_() {
@@ -86,7 +134,7 @@ void BalancerComponent::save_() {
 void BalancerComponent::update_acq_status_() {
 #ifdef USE_ESP32
   if (!acq_started_) return;
-  const bal::AcqStatus &st = acq_.status();
+  const bal::AcqStatus &st = mpu_ ? mpu_->status() : acq_->status();
   live_.acq_ok = st.running.load();
   live_.aligned = st.aligned.load();
   live_.fs = st.measured_fs.load();
@@ -103,11 +151,9 @@ void BalancerComponent::update_acq_status_() {
 
 void BalancerComponent::loop() {
   const uint32_t now = millis();
-#ifdef USE_ESP32
   if (acq_started_) {
-    for (int i = 0; i < 8 && acq_.pop(rev_buf_); i++) feed_rev(rev_buf_, now);
+    for (int i = 0; i < 8 && acq_pop_(rev_buf_); i++) feed_rev(rev_buf_, now);
   }
-#endif
   tick(now);
 
   if (!ui_.built() && lv_display_get_default() != nullptr) {
@@ -138,12 +184,32 @@ void BalancerComponent::publish_sensors_() {
 void BalancerComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Balancer:");
   ESP_LOGCONFIG(TAG, "  Mode: %s", simulate_ ? "DEMO (simulated rotor)" : "sensors");
+  ESP_LOGCONFIG(TAG, "  Preset: %s", preset_ == bal::Preset::TIRE ? "tire" : "motor rotor");
+  ESP_LOGCONFIG(TAG, "  Tach: GPIO%d, %s edge%s", acq_cfg_.pin_tach, acq_cfg_.tach_falling ? "falling" : "rising",
+                acq_cfg_.tach_pullup ? ", pull-up" : "");
+  if (use_mpu_) {
+    static const char kAxis[] = "XYZ";
+    ESP_LOGCONFIG(TAG, "  Sensors: MPU-6050 family on I2C, SDA GPIO%d, SCL GPIO%d, %u Hz", mpu_cfg_.pin_sda,
+                  mpu_cfg_.pin_scl, (unsigned) mpu_cfg_.i2c_hz);
+    ESP_LOGCONFIG(TAG, "  Readings: %u Hz, %d Hz low-pass, +/-%d g", (unsigned) mpu_cfg_.sample_rate, mpu_cfg_.filter_hz,
+                  mpu_cfg_.range_g);
+    for (int c = 0; c < mpu_cfg_.sensors; c++) {
+#ifdef USE_ESP32
+      const char *chip = mpu_ ? mpu_->chip_name(c) : "not started";
+#else
+      const char *chip = "";
+#endif
+      ESP_LOGCONFIG(TAG, "  Sensor %c: address 0x%02X, INT GPIO%d, %c axis%s, %s", c == 0 ? 'A' : 'B',
+                    mpu_cfg_.address[c], mpu_cfg_.pin_int[c], kAxis[mpu_cfg_.axis[c]],
+                    settings_.invert[c] ? ", inverted" : "", chip);
+    }
+    if (mpu_cfg_.sensors < 2) ESP_LOGCONFIG(TAG, "  One sensor: single-plane balancing only");
+    return;
+  }
   ESP_LOGCONFIG(TAG, "  I2S%d: MCLK GPIO%d, BCLK GPIO%d, LRCK GPIO%d, DIN GPIO%d, %u Hz%s", acq_cfg_.i2s_port,
                 acq_cfg_.pin_mclk, acq_cfg_.pin_bclk, acq_cfg_.pin_ws, acq_cfg_.pin_din,
                 (unsigned) acq_cfg_.sample_rate, acq_cfg_.use_apll ? " (APLL)" : "");
   ESP_LOGCONFIG(TAG, "  LRCK capture: %s", acq_cfg_.pin_lrck_capture < 0 ? "on the LRCK pad" : "separate pin");
-  ESP_LOGCONFIG(TAG, "  Tach: GPIO%d, %s edge%s", acq_cfg_.pin_tach, acq_cfg_.tach_falling ? "falling" : "rising",
-                acq_cfg_.tach_pullup ? ", pull-up" : "");
   for (int c = 0; c < 2; c++)
     ESP_LOGCONFIG(TAG, "  Channel %c: %.2f mV/g, gain %.2f%s", c == 0 ? 'A' : 'B', settings_.sens_mv_g[c],
                   settings_.gain[c], settings_.invert[c] ? ", inverted" : "");

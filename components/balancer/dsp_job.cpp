@@ -41,7 +41,7 @@ const char *job_step_name(JobStep s) {
 void BalanceJob::reset(const JobConfig &cfg) {
   cfg_ = cfg;
   if (cfg_.planes < 1) cfg_.planes = 1;
-  if (cfg_.planes > 2) cfg_.planes = 2;
+  if (cfg_.planes > max_planes_) cfg_.planes = max_planes_;
   step_ = JobStep::SETUP;
   test_rpm_ = 0;
   for (int s = 0; s < kMaxSensors; s++) {
@@ -52,7 +52,10 @@ void BalanceJob::reset(const JobConfig &cfg) {
   result_ = JobResult();
 }
 
-void BalanceJob::start() { step_ = JobStep::RUN0; }
+void BalanceJob::start() {
+  if (cfg_.planes > max_planes_) cfg_.planes = max_planes_;
+  step_ = JobStep::RUN0;
+}
 
 double BalanceJob::to_user_angle(double internal_deg) const {
   return cfg_.angles_with_rotation ? wrap360(-internal_deg) : wrap360(internal_deg);
@@ -66,20 +69,40 @@ cplx BalanceJob::trial_vector(int p) const {
   return unbalance(ps.trial_mass_g, ps.trial_radius_mm, to_internal_angle(ps.trial_angle_deg));
 }
 
+double BalanceJob::plane_iso_limit_gmm_(int p) const {
+  const double total = iso_uper_gmm(cfg_.grade, cfg_.rotor_mass_kg, cfg_.service_rpm);
+  const double share = cfg_.planes == 1 ? 1.0 : (p == 0 ? cfg_.plane1_load_fraction : 1.0 - cfg_.plane1_load_fraction);
+  return total * share;
+}
+
+// The 10%-of-rotor-weight rule grows without limit as the test speed drops
+// (a tire at 240 rpm would get 150 g), so it is capped at ten times the ISO
+// limit for the plane: enough to move the reading clearly, never silly.
 double BalanceJob::suggested_trial_g(int p) const {
   const double rpm = test_rpm_ > 0 ? test_rpm_ : cfg_.service_rpm;
   const double r = cfg_.plane[p].trial_radius_mm;
   if (r <= 0) return 0;
-  return suggest_trial_gmm(cfg_.rotor_mass_kg, rpm, 0.1) / r;
+  const double by_weight = suggest_trial_gmm(cfg_.rotor_mass_kg, rpm, 0.1);
+  const double cap = kTrialIsoMultiple * plane_iso_limit_gmm_(p);
+  return (cap > 0 && cap < by_weight ? cap : by_weight) / r;
+}
+
+bool BalanceJob::suggested_trial_capped(int p) const {
+  const double rpm = test_rpm_ > 0 ? test_rpm_ : cfg_.service_rpm;
+  const double cap = kTrialIsoMultiple * plane_iso_limit_gmm_(p);
+  return cap > 0 && cap < suggest_trial_gmm(cfg_.rotor_mass_kg, rpm, 0.1);
 }
 
 std::string BalanceJob::instruction() const {
   const double lo = test_rpm_ * (1.0 - cfg_.window), hi = test_rpm_ * (1.0 + cfg_.window);
   std::string coast;
   if (test_rpm_ > 0)
-    coast = fmt("Spin above %.0f rpm, cut the air, and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi);
+    coast = air_drive_
+                ? fmt("Spin above %.0f rpm, cut the air, and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi)
+                : fmt("Spin it above %.0f rpm and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi);
   else
-    coast = "Spin it up with air and tap LOCK SPEED at the test speed you want, then let it coast.";
+    coast = air_drive_ ? "Spin it up with air and tap LOCK SPEED at the test speed you want, then let it coast."
+                       : "Spin it up and tap LOCK SPEED at the test speed you want, then let it coast.";
 
   auto trial_txt = [&](int p) {
     const PlaneSetup &ps = cfg_.plane[p];

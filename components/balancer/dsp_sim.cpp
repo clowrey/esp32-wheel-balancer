@@ -15,6 +15,19 @@ RevSim::RevSim() : rng_(42) {
   fitted_[0] = fitted_[1] = 0;
 }
 
+void RevSim::set_tire() {
+  rpm_ref = 240;
+  // g per g*mm at 240 rpm: the hub moves about U/M on a soft rig.
+  a_true[0][0] = polar_deg(3.0e-6, 182);
+  a_true[0][1] = polar_deg(4.2e-6, 178);
+  a_true[1][0] = polar_deg(0.8e-6, 175);
+  a_true[1][1] = polar_deg(1.0e-6, 5);
+  u0[0] = polar_deg(7000, 70);   // 35 g at 200 mm, inner rim
+  u0[1] = polar_deg(5000, 130);  // 25 g at 200 mm, outer rim
+  noise_g = 0.0006;              // MPU-6050 noise on one revolution's 1x
+  stop_rpm = 40;
+}
+
 void RevSim::blast(double rpm, double tau_s) {
   rpm_ = rpm;
   tau_ = tau_s;
@@ -23,7 +36,6 @@ void RevSim::blast(double rpm, double tau_s) {
 
 int RevSim::step(double dt, RevResult *out, int max) {
   int n = 0;
-  const double stop_rpm = 60.0;
   while (dt > 0 && rpm_ > stop_rpm && n < max) {
     const double rev_per_s = rpm_ / 60.0;
     const double to_next = (1.0 - (angle_ - std::floor(angle_))) / rev_per_s;

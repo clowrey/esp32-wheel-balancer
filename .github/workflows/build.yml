@@ -29,12 +29,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fetch LVGL 9.5.0 (same version as ESPHome 2026.9)
         run: git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git /tmp/lvgl
-      - name: Render every screen with the demo rotor
+      - name: Render every screen with the demo rotor and the demo wheel
         run: |
           cmake -S tools/ui_preview -B build/ui -DLVGL_DIR=/tmp/lvgl
           cmake --build build/ui -j
           mkdir -p shots
           ./build/ui/ui_preview shots
+          ./build/ui/ui_preview shots tire
           pip install pillow
           python3 -c "import glob; from PIL import Image; [Image.open(p).save(p[:-4]+'.png') for p in glob.glob('shots/*.ppm')]"
           rm shots/*.ppm
@@ -51,6 +52,8 @@ jobs:
         include:
           - {config: balancer-jc1060p470.yaml, name: balancer}
           - {config: balancer-demo.yaml, name: balancer-demo}
+          - {config: balancer-tire.yaml, name: balancer-tire}
+          - {config: balancer-tire-demo.yaml, name: balancer-tire-demo}
           - {config: ci/bringup.yaml, name: bringup}
     steps:
       - uses: actions/checkout@v4

@@ -15,6 +15,9 @@ namespace bal {
 class RevSim {
  public:
   RevSim();
+  // Swap the motor rotor for a car wheel on a soft rig read by MEMS sensors
+  // (same numbers as the host test in tests/test_mpu.cpp).
+  void set_tire();
   // Air blast: jump to rpm and start coasting with time constant tau_s.
   void blast(double rpm, double tau_s = 10.0);
   // Extra unbalance currently fitted to the rotor (trial or correction), g*mm per plane.
@@ -31,6 +34,7 @@ class RevSim {
   cplx u0[2];
   double rpm_ref = 1500;
   double noise_g = 0.0015;  // per-revolution noise on the 1x vector
+  double stop_rpm = 60;     // below this the rotor counts as stopped
 
  private:
   std::mt19937 rng_;

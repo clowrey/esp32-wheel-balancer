@@ -160,6 +160,9 @@ bool RevolutionAnalyzer::analyze_(double t0, double t1, RevResult &out) {
       cplx v = std::conj(cplx(acc[c][h].real(), acc[c][h].imag())) * scale;
       // Remove the fixed chain delay: it shows up as extra lag of h*omega*tau.
       v *= std::polar(1.0, -(h + 1) * out.omega * cfg_.delay_s);
+      // An order above 0.45*fs would be an alias, not a measurement. Only
+      // slow-sampling digital sensors ever get there.
+      if (static_cast<double>(h + 1) > kMaxOrderBand * period) v = 0;
       out.order[c][h] = v;
     }
     for (int b = 0; b < kWaveBins; b++)

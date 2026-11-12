@@ -26,6 +26,9 @@ struct MeasureConfig {
                                     // within this (standard error, units of quantity): a well balanced
                                     // rotor has no meaningful phase
 
+  int best_effort_factor = 0;       // > 0: also "ready" after this many times target_revs, whatever the
+                                    // uncertainty (noisy sensors on a hand-spun rotor); 0 = off
+
   int block_revs = 10;              // block size for the uncertainty estimate
   Quantity quantity = Quantity::VELOCITY_MM_S;
 };
@@ -61,6 +64,7 @@ struct MeasureStats {
   double rpm_mean = 0, rpm_min = 0, rpm_max = 0;
   ChannelStats ch[kChannels];
   bool ready = false;
+  bool best_effort = false;    // ready only because of best_effort_factor: uncertainty is above the target
   uint32_t rejected[6] = {0};  // count by RevStatus
 };
 

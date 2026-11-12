@@ -156,6 +156,7 @@ TrialCheck check_trial(const cplx *v0, const cplx *v1, int sensors, double min_a
   TrialCheck t;
   for (int s = 0; s < sensors; s++) {
     const double a0 = std::abs(v0[s]);
+    if (a0 == 0 && std::abs(v1[s]) == 0) continue;  // no sensor on this channel
     const double frac = a0 > 0 ? std::abs(v1[s] - v0[s]) / a0 : INFINITY;
     const double dph = std::fabs(wrap180(arg_deg(v1[s]) - arg_deg(v0[s])));
     t.amp_change_frac = std::max(t.amp_change_frac, frac);

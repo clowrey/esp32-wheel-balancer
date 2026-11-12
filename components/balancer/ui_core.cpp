@@ -20,9 +20,70 @@ void ModelCore::configure_measurement_() {
   mc.max_phase_unc_deg = settings_.max_phase_unc_deg;
   mc.quantity = settings_.quantity;
   mc.amp_floor = default_amp_floor(settings_.quantity);
+  if (amp_floor_um_ > 0) {
+    // Given as a displacement; express it in the unit the run is measured in.
+    const double w = job_.test_rpm() * kTwoPi / 60.0;
+    if (settings_.quantity == Quantity::DISPLACEMENT_UM)
+      mc.amp_floor = amp_floor_um_;
+    else if (w > 0 && settings_.quantity == Quantity::VELOCITY_MM_S)
+      mc.amp_floor = amp_floor_um_ * w * 1e-3;
+    else if (w > 0)
+      mc.amp_floor = amp_floor_um_ * 1e-6 * w * w / kStandardGravity;
+  }
   mc.target_rpm = job_.test_rpm();
+  mc.max_period_change = max_period_change_;
+  mc.best_effort_factor = best_effort_factor_;
   meas_.configure(mc);
   job_.mutable_config().window = settings_.window;
+}
+
+void ModelCore::apply_preset(Preset p) {
+  preset_ = p;
+  JobConfig cfg;        // MOTOR_ROTOR is what the struct defaults describe
+  UiSettings st;
+  for (int c = 0; c < kChannels; c++) {  // sensor scaling is not part of a preset
+    st.sens_mv_g[c] = settings_.sens_mv_g[c];
+    st.gain[c] = settings_.gain[c];
+    st.invert[c] = settings_.invert[c];
+  }
+  max_period_change_ = 0.01;
+  best_effort_factor_ = 0;
+  amp_floor_um_ = 0;
+  bool air = true;
+  if (p == Preset::TIRE) {
+    // A car wheel: about 20 kg, balanced to 5 g or better per rim edge.
+    // G6.3 at 800 rpm (roughly 100 km/h) allows 750 g*mm per plane, which is
+    // 3.8 g at a 200 mm rim radius.
+    cfg.rotor_mass_kg = 20.0;
+    cfg.service_rpm = 800.0;
+    cfg.grade = 6.3;
+    for (auto &pl : cfg.plane) {
+      pl.trial_mass_g = 30.0;
+      pl.trial_radius_mm = 200.0;
+      pl.corr_radius_mm = 200.0;
+      pl.remove_mode = false;  // stick-on or clip-on weights
+    }
+    // Hand-spun and coasting at a few revolutions per second: few
+    // revolutions fit in a narrow window, and each one slows noticeably.
+    // On a soft rig the displacement barely depends on speed, so a wide
+    // window in displacement units is honest.
+    st.quantity = Quantity::DISPLACEMENT_UM;
+    st.window = 0.10;
+    st.target_revs = 20;
+    st.max_phase_unc_deg = 3.0;
+    max_period_change_ = 0.03;
+    // MEMS noise: a reading known to 2.5 um is as good as it gets in one or
+    // two spins, and is a few percent of what the tolerance looks like.
+    amp_floor_um_ = 2.5;
+    best_effort_factor_ = 4;
+    air = false;
+  }
+  settings_ = st;
+  job_.reset(cfg);  // keeps the sensor count limit
+  job_.set_air_drive(air);
+  sim_ = RevSim();  // demo rotor to match
+  if (p == Preset::TIRE) sim_.set_tire();
+  configure_measurement_();
 }
 
 void ModelCore::apply_settings(bool persist) {
@@ -94,6 +155,11 @@ std::string ModelCore::machine_summary() const {
 }
 
 void ModelCore::sim_blast() {
+  if (preset_ == Preset::TIRE) {  // a hand spin: slower, and it coasts for a long time
+    const double t = job_.test_rpm() > 0 ? job_.test_rpm() : 240.0;
+    sim_.blast(t * 1.25, 30.0);
+    return;
+  }
   const double t = job_.test_rpm() > 0 ? job_.test_rpm() : 1500.0;
   sim_.blast(t * 1.12, 10.0);
 }
@@ -170,7 +236,7 @@ void ModelCore::tick(uint32_t now_ms) {
     for (int i = 0; i < n; i++) feed_rev(buf[i], now_ms);
     live_.acq_ok = false;
     live_.aligned = true;
-    live_.fs = 16000;
+    live_.fs = digital_sensor_ ? 250 : 16000;
     for (int c = 0; c < 2; c++) {
       live_.rms_g[c] = live_revs_.empty() ? 0.0f : static_cast<float>(std::abs(live_revs_.back().o[c][0]) / std::sqrt(2.0));
       live_.peak_frac[c] = 0.02f;

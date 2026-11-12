@@ -376,11 +376,13 @@ void BalancerUi::refresh_rows_(std::vector<Row> &rows) {
   if (suggest_label_ != nullptr && model_ != nullptr) {
     const auto &cfg = model_->job().config();
     const double g = model_->job().suggested_trial_g(plane_sel_);
-    lv_label_set_text(suggest_label_,
-                      fmt("Suggested trial for plane %d: %.2f g at %.0f mm\n(10%% of rotor weight at %.0f rpm)",
-                          plane_sel_ + 1, g, cfg.plane[plane_sel_].trial_radius_mm,
-                          model_->job().test_rpm() > 0 ? model_->job().test_rpm() : cfg.service_rpm)
-                          .c_str());
+    const double rpm = model_->job().test_rpm() > 0 ? model_->job().test_rpm() : cfg.service_rpm;
+    const std::string why = model_->job().suggested_trial_capped(plane_sel_)
+                                ? fmt("(10x the ISO limit for this plane)")
+                                : fmt("(10%% of rotor weight at %.0f rpm)", rpm);
+    lv_label_set_text(suggest_label_, fmt("Suggested trial for plane %d: %.*f g at %.0f mm\n%s", plane_sel_ + 1,
+                                          g >= 10 ? 0 : 2, g, cfg.plane[plane_sel_].trial_radius_mm, why.c_str())
+                                          .c_str());
   }
 }
 
@@ -522,10 +524,11 @@ void BalancerUi::build_setup_() {
   number_row_(rows, lcol, "Service speed", "rpm", 0, [&cfg]() -> double & { return cfg.service_rpm; }, 10, 100000);
   row_(rows, lcol, "Balance grade", [&cfg]() { return fmt("G%g", cfg.grade); },
        [this, &cfg]() {
-         const double grades[] = {1.0, 2.5, 6.3, 16.0};
+         const double grades[] = {1.0, 2.5, 6.3, 16.0, 40.0};
+         const int n = 5;
          int i = 0;
-         while (i < 4 && grades[i] != cfg.grade) i++;
-         cfg.grade = grades[(i + 1) % 4];
+         while (i < n && grades[i] != cfg.grade) i++;
+         cfg.grade = grades[(i + 1) % n];
          refresh_rows_(setup_rows_);
        });
   row_(rows, lcol, "Angles measured",
@@ -651,7 +654,7 @@ void BalancerUi::build_measure_() {
   }, col(kPanel2));
   lv_obj_set_pos(m_setspeed_, 16, 310);
   lv_obj_set_size(m_setspeed_, 145, 44);
-  m_blast_ = button_(sp, "AIR BLAST", F20, [this]() { model_->sim_blast(); }, col(0x7c3aed));
+  m_blast_ = button_(sp, model_->job().air_drive() ? "AIR BLAST" : "SPIN", F20, [this]() { model_->sim_blast(); }, col(0x7c3aed));
   lv_obj_set_pos(m_blast_, 169, 310);
   lv_obj_set_size(m_blast_, 145, 44);
 
@@ -755,7 +758,7 @@ void BalancerUi::build_live_() {
   lv_obj_t *b = button_(s, LV_SYMBOL_HOME "  Home", F20, [this]() { show(HOME); }, col(kPanel2));
   lv_obj_set_pos(b, 16, 536);
   lv_obj_set_size(b, 200, 52);
-  l_blast_ = button_(s, "AIR BLAST", F20, [this]() { model_->sim_blast(); }, col(0x7c3aed));
+  l_blast_ = button_(s, model_->job().air_drive() ? "AIR BLAST" : "SPIN", F20, [this]() { model_->sim_blast(); }, col(0x7c3aed));
   lv_obj_set_pos(l_blast_, 232, 536);
   lv_obj_set_size(l_blast_, 200, 52);
 }
@@ -769,10 +772,13 @@ void BalancerUi::build_settings_() {
   UiSettings &st = model_->settings();
   auto &rows = settings_rows_;
   auto apply = [this]() { model_->apply_settings(false); };
-  number_row_(rows, colm, "Sensor A sensitivity", "mV/g", 2, [&st]() -> double & { return st.sens_mv_g[0]; }, 0.1, 10000, apply);
-  number_row_(rows, colm, "Sensor B sensitivity", "mV/g", 2, [&st]() -> double & { return st.sens_mv_g[1]; }, 0.1, 10000, apply);
-  number_row_(rows, colm, "Gain A", "x", 2, [&st]() -> double & { return st.gain[0]; }, 0.01, 1000, apply);
-  number_row_(rows, colm, "Gain B", "x", 2, [&st]() -> double & { return st.gain[1]; }, 0.01, 1000, apply);
+  const bool digital = model_->digital_sensor();
+  if (!digital) {  // a digital sensor already reports g
+    number_row_(rows, colm, "Sensor A sensitivity", "mV/g", 2, [&st]() -> double & { return st.sens_mv_g[0]; }, 0.1, 10000, apply);
+    number_row_(rows, colm, "Sensor B sensitivity", "mV/g", 2, [&st]() -> double & { return st.sens_mv_g[1]; }, 0.1, 10000, apply);
+    number_row_(rows, colm, "Gain A", "x", 2, [&st]() -> double & { return st.gain[0]; }, 0.01, 1000, apply);
+    number_row_(rows, colm, "Gain B", "x", 2, [&st]() -> double & { return st.gain[1]; }, 0.01, 1000, apply);
+  }
   for (int c = 0; c < 2; c++) {
     row_(rows, colm, c == 0 ? "Sensor A polarity" : "Sensor B polarity",
          [&st, c]() { return std::string(st.invert[c] ? "inverted" : "normal"); },
@@ -808,11 +814,16 @@ void BalancerUi::build_settings_() {
 
   lv_obj_t *right = box(s, 592, 66, 416, 458);
   lv_obj_t *t = text(right,
-                     "Sensitivity: from each sensor's\ncalibration sheet (mV/g).\n\n"
-                     "Gain: front-end gain ahead of the\nADC (x10 for 100 mV/g sensors).\n\n"
-                     "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
-                     "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
-                     "Changes apply immediately.\nSAVE keeps them after a reboot.",
+                     digital ? "Sensors: digital accelerometers,\nalready calibrated in g.\n\n"
+                               "Polarity: flip a sensor that is\nmounted facing the other way.\n\n"
+                               "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
+                               "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
+                               "Changes apply immediately.\nSAVE keeps them after a reboot."
+                             : "Sensitivity: from each sensor's\ncalibration sheet (mV/g).\n\n"
+                               "Gain: front-end gain ahead of the\nADC (x10 for 100 mV/g sensors).\n\n"
+                               "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
+                               "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
+                               "Changes apply immediately.\nSAVE keeps them after a reboot.",
                      F20, kMuted, 16, 14);
   (void) t;
 
@@ -903,9 +914,12 @@ void BalancerUi::update_bar_() {
 void BalancerUi::update_home_() {
   set_enabled(home_trim_btn_, model_->has_machine());
   lv_label_set_text(home_info_, model_->machine_summary().c_str());
-  lv_label_set_text(home_demo_, model_->simulate()
-                                    ? "DEMO MODE: simulated rotor, no ADC. Use AIR BLAST to spin it. Set simulate: false for real sensors."
-                                    : "");
+  const char *demo = "";
+  if (model_->simulate())
+    demo = model_->job().air_drive()
+               ? "DEMO MODE: simulated rotor, no ADC. Use AIR BLAST to spin it. Set simulate: false for real sensors."
+               : "DEMO MODE: simulated wheel, no sensors. Use SPIN to spin it. Set simulate: false for real sensors.";
+  lv_label_set_text(home_demo_, demo);
 }
 
 void BalancerUi::update_measure_() {
@@ -931,9 +945,10 @@ void BalancerUi::update_measure_() {
                                      set.window * 100)
                                      .c_str());
   } else {
-    lv_bar_set_value(m_gauge_, static_cast<int32_t>(std::min(1.0, lv.rpm / 3600.0) * 1000), LV_ANIM_OFF);
+    const double top = std::max(100.0, 2.0 * job.config().service_rpm);
+    lv_bar_set_value(m_gauge_, static_cast<int32_t>(std::min(1.0, lv.rpm / top) * 1000), LV_ANIM_OFF);
     set_visible(m_band_, false);
-    lv_label_set_text(m_window_, "test speed not locked yet (0 - 3600 rpm)");
+    lv_label_set_text(m_window_, fmt("test speed not locked yet (0 - %.0f rpm)", top).c_str());
   }
   const RevStatus rs = model_->last_rev_status();
   std::string state;
@@ -948,7 +963,7 @@ void BalancerUi::update_measure_() {
         sc = kGreen;
         break;
       case RevStatus::ABOVE_WINDOW:
-        state = "Above window: cut the air, let it coast";
+        state = job.air_drive() ? "Above window: cut the air, let it coast" : "Above window: let it coast";
         sc = kAmber;
         break;
       case RevStatus::BELOW_WINDOW:
@@ -968,8 +983,8 @@ void BalancerUi::update_measure_() {
     }
   }
   if (st.ready) {
-    state = "Ready: tap ACCEPT";
-    sc = kGreen;
+    state = st.best_effort ? "Enough revolutions: ACCEPT, or keep going" : "Ready: tap ACCEPT";
+    sc = st.best_effort ? kAmber : kGreen;
   }
   lv_label_set_text(m_state_, state.c_str());
   lv_obj_set_style_text_color(m_state_, col(sc), 0);
@@ -1067,11 +1082,15 @@ void BalancerUi::update_live_() {
                                     arg_deg(lv.v[c]), lv.rms_g[c], lv.peak_frac[c] * 100)
                                     .c_str());
   }
-  lv_label_set_text(l_diag_, fmt("%s\nsample rate %.1f Hz %s\ntach pulses %u, glitches %u\nresyncs %u, DMA overflows %u\n"
+  const bool digital = model_->digital_sensor();
+  lv_label_set_text(l_diag_, fmt("%s\nsample rate %.1f Hz %s\ntach pulses %u, glitches %u\n%s %u, %s %u\n"
                                  "average of last %d revolutions",
-                                 lv.acq_ok ? "acquisition running" : (model_->simulate() ? "demo mode (no ADC)" : "ADC NOT RUNNING"),
-                                 lv.fs, lv.aligned ? "(locked)" : "(not locked)", lv.tach_pulses, lv.glitches, lv.resyncs,
-                                 lv.overflows, lv.revs)
+                                 lv.acq_ok ? "acquisition running"
+                                           : (model_->simulate() ? "demo mode (no ADC)"
+                                                                 : (digital ? "SENSORS NOT RUNNING" : "ADC NOT RUNNING")),
+                                 lv.fs, lv.aligned ? "(locked)" : "(not locked)", lv.tach_pulses, lv.glitches,
+                                 digital ? "restarts" : "resyncs", lv.resyncs,
+                                 digital ? "missed readings" : "DMA overflows", lv.overflows, lv.revs)
                               .c_str());
   // waveform: box 652x226, drawing area x 16..636, y 40..210
   float mx = 1e-6f;

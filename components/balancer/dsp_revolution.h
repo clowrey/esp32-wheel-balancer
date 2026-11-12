@@ -16,6 +16,10 @@
 
 namespace bal {
 
+// Orders whose frequency is above this fraction of the sample rate are
+// reported as zero.
+constexpr double kMaxOrderBand = 0.45;
+
 struct RevolutionConfig {
   double fs = 16000.0;        // sample rate, Hz
   double min_rpm = 60.0;      // slower revolutions are discarded (gap)
