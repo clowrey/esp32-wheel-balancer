@@ -62,7 +62,7 @@ class ModelCore : public UiModel {
   RevStatus last_rev_status() const override { return last_status_; }
   const std::vector<cplx> &run_dots(int ch) override { return dots_[ch]; }
   void lock_speed(double rpm) override;
-  bool has_machine() const override { return has_machine_; }
+  bool has_machine() const override { return has_machine_ && machine_.planes <= job_.max_planes(); }
   void save_machine() override;
   bool start_trim() override;
   std::string machine_summary() const override;

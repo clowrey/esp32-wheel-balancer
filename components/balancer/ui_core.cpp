@@ -140,7 +140,7 @@ void ModelCore::save_machine() {
 }
 
 bool ModelCore::start_trim() {
-  if (!has_machine_) return false;
+  if (!has_machine()) return false;
   job_.reset(machine_cfg_);
   job_.load_model(machine_, machine_rpm_);
   return true;

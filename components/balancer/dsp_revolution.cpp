@@ -13,7 +13,7 @@ void RevolutionAnalyzer::configure(const RevolutionConfig &cfg) {
   while (n < cfg_.ring_size) n <<= 1;
   cfg_.ring_size = n;
   mask_ = n - 1;
-  for (auto &r : ring_) r.assign(n, 0.0f);
+  for (auto &r : ring_) std::vector<float>(n, 0.0f).swap(r);  // swap, so a smaller ring frees the old one
   reset();
 }
 

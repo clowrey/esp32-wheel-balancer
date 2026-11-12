@@ -42,7 +42,7 @@ struct MpuConfig {
   int pin_tach = -1;
   bool tach_falling = false;
   bool tach_pullup = true;
-  RevolutionConfig rev;         // fs and delay_s are filled in at start
+  RevolutionConfig rev;         // fs is filled in at start; delay_s is not used (see delay_s_)
   int task_core = 1;
   int task_priority = 10;
 };
@@ -57,7 +57,7 @@ class MpuAcquisition {
   // Only the polarity can change at runtime: the sensor already reports g.
   void set_invert(int ch, bool invert);
   const char *chip_name(int ch) const { return chip_[ch]; }
-  double filter_delay_s() const { return cfg_.rev.delay_s; }
+  double filter_delay_s(int ch) const { return delay_s_[ch]; }
 
   // --- internals used by the ISR trampoline ---
   struct Event {
@@ -90,6 +90,10 @@ class MpuAcquisition {
   uint32_t cap_resolution_ = 0;
   const char *chip_[2] = {"?", "?"};
   float g_per_count_ = 1.0f / 16384.0f;
+  // Each sensor's low-pass group delay. A reading is stamped this much
+  // earlier than its data-ready edge, so two different chips still line up.
+  double delay_s_[2] = {0, 0};
+  uint32_t delay_ticks_[2] = {0, 0};
   std::atomic<bool> invert_[2];
   // Running stats for the status page.
   double sum_[2] = {0, 0}, sq_sum_[2] = {0, 0};

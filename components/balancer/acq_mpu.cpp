@@ -33,7 +33,10 @@ constexpr uint8_t kRegWhoAmI = 0x75;
 constexpr int kI2cTimeoutMs = 5;
 
 // Low-pass choices: DLPF_CFG value and the accelerometer's group delay,
-// which is removed from the phase like the PCM1808's delay is.
+// which is removed from the phase like the PCM1808's delay is. The MPU-6050
+// column is from its register map. The MPU-6500-family column is less
+// certain (register-map revisions disagree); it only shifts the displayed
+// phase, which the trial runs calibrate out.
 struct FilterRow {
   int hz;
   uint8_t cfg;
@@ -101,6 +104,9 @@ bool MpuAcquisition::setup_i2c_() {
     ESP_LOGE(TAG, "I2C bus on SDA GPIO%d / SCL GPIO%d failed", cfg_.pin_sda, cfg_.pin_scl);
     return false;
   }
+  // The sensors stay powered through a reboot of the P4 and one may have been
+  // cut off mid-transfer, holding SDA low. Clock it free before probing.
+  i2c_master_bus_reset(bus_);
   for (int s = 0; s < cfg_.sensors; s++) {
     if (i2c_master_probe(bus_, cfg_.address[s], 50) != ESP_OK) {
       ESP_LOGE(TAG, "sensor %c: nothing answers at 0x%02X (check wiring; AD0 high selects 0x69)", 'A' + s,
@@ -174,7 +180,7 @@ bool MpuAcquisition::setup_sensor_(int s) {
     ESP_LOGE(TAG, "sensor %c: configuration failed", 'A' + s);
     return false;
   }
-  if (s == 0) cfg_.rev.delay_s = family_6500 ? f->delay_6500_s : f->delay_6050_s;
+  delay_s_[s] = family_6500 ? f->delay_6500_s : f->delay_6050_s;
   return true;
 }
 
@@ -243,7 +249,11 @@ bool MpuAcquisition::start(const MpuConfig &cfg) {
     if (!setup_sensor_(s)) return false;
 
   // Analysis runs on the resampler's grid. Slow rotors: keep revolutions down
-  // to 30 rpm, and size the ring for two of the slowest.
+  // to 30 rpm, and size the ring for two of the slowest. The filter delay is
+  // taken off each reading's timestamp, so the analyzer has none to remove.
+  for (int s = 0; s < 2; s++)
+    delay_ticks_[s] = static_cast<uint32_t>(delay_s_[s] * static_cast<double>(cap_resolution_) + 0.5);
+  cfg_.rev.delay_s = 0;
   cfg_.rev.fs = cfg_.sample_rate;
   cfg_.rev.min_rpm = 30.0;
   const double fastest = 60.0 * cfg_.sample_rate / 8.0;  // at least 8 samples per revolution
@@ -257,7 +267,7 @@ bool MpuAcquisition::start(const MpuConfig &cfg) {
   xTaskCreatePinnedToCore(task_trampoline_, "balancer_mpu", 8192, this, cfg_.task_priority, &task_handle_,
                           cfg_.task_core);
   ESP_LOGI(TAG, "acquisition running: %d sensor(s) at %u Hz, %d Hz filter (delay %.1f ms), +/-%d g", cfg_.sensors,
-           (unsigned) cfg_.sample_rate, cfg_.filter_hz, cfg_.rev.delay_s * 1e3, cfg_.range_g);
+           (unsigned) cfg_.sample_rate, cfg_.filter_hz, delay_s_[0] * 1e3, cfg_.range_g);
   return true;
 }
 
@@ -276,8 +286,10 @@ void MpuAcquisition::task_() {
   Event e;
   RevResult rev;
   uint64_t frames = 0;
-  uint32_t last_stat_ms = 0, last_warn_ms = 0, warned_errors = 0;
-  uint32_t last_reading_ms[2] = {0, 0};
+  const uint32_t start_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+  uint32_t last_stat_ms = start_ms, last_warn_ms = start_ms, warned_errors = 0;
+  uint32_t last_reading_ms[2] = {start_ms, start_ms};
+  uint32_t last_reinit_ms[2] = {start_ms, start_ms};
 
   while (status_.running.load()) {
     const bool got = xQueueReceive(evq_, &e, pdMS_TO_TICKS(100)) == pdTRUE;
@@ -308,7 +320,7 @@ void MpuAcquisition::task_() {
         const float frac = std::fabs(static_cast<float>(raw)) / 32768.0f;
         if (frac > peak_[s]) peak_[s] = frac;
         last_reading_ms[s] = now_ms;
-        resampler_.push(s, e.ticks, g);
+        resampler_.push(s, e.ticks - delay_ticks_[s], g);  // when the motion happened, not when it was reported
       }
     }
 
@@ -349,6 +361,17 @@ void MpuAcquisition::task_() {
         sum_[c] = sq_sum_[c] = 0;
         peak_[c] = 0;
         stat_n_[c] = 0;
+      }
+      // A sensor that lost power or was re-plugged comes back asleep with its
+      // interrupt off: set it up again (this stalls the other one for ~0.15 s).
+      for (int c = 0; c < cfg_.sensors; c++) {
+        if (now_ms - last_reading_ms[c] > 1500 && now_ms - last_reinit_ms[c] > 3000) {
+          last_reinit_ms[c] = now_ms;
+          if (setup_sensor_(c)) {
+            delay_ticks_[c] = static_cast<uint32_t>(delay_s_[c] * static_cast<double>(cap_resolution_) + 0.5);
+            ESP_LOGW(TAG, "sensor %c was silent and has been set up again", 'A' + c);
+          }
+        }
       }
       status_.aligned.store(alive);
       status_.frames.store(static_cast<uint32_t>(frames));

@@ -170,7 +170,12 @@ and neither is locked to the P4. The firmware therefore:
   newer edge arrived before the read finished;
 - interpolates each sensor onto a uniform 250 Hz grid defined by the capture
   timer (`dsp_resample`), where a tach edge's position is a plain division;
-- removes the sensor filter's delay (4.9 ms at 44 Hz) from the phase.
+- stamps each reading earlier by its sensor filter's delay (4.9 ms at 44 Hz),
+  so the phase is right even if the two boards carry different chips.
+
+A reading or two lost in a row is bridged; a longer hole restarts the grid. A
+sensor that goes silent (loose plug, brown-out) is set up again automatically
+after a couple of seconds.
 
 From there the same per-revolution analysis, speed window and solver run as
 for the PCM1808. The LIVE screen shows the sensor's measured rate, restarts

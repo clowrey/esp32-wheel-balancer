@@ -6,8 +6,10 @@ namespace bal {
 
 namespace {
 // A sensor that stays quiet longer than this many output samples restarts
-// the grid; shorter holes are bridged by interpolation.
-constexpr double kMaxGapSamples = 50.0;
+// the grid; shorter holes (a reading or two lost) are bridged by
+// interpolation. Bridging more than this would pass a straight line off as a
+// measurement.
+constexpr double kMaxGapSamples = 6.0;
 // One channel running this far ahead of the other means the other sensor
 // has stopped answering.
 constexpr size_t kMaxBacklog = 512;
@@ -67,10 +69,14 @@ void StreamResampler::push(int ch, uint32_t ticks, float value) {
 
   if (c.have) {
     const int64_t dt = t - c.t;
-    if (dt <= 0) return;  // duplicate or out of order: ignore
-    // Either this sensor was silent for too long, or the other one is: start
-    // a new grid with this reading as its first.
-    if (static_cast<double>(dt) > kMaxGapSamples * ticks_per_sample_ || c.out.size() > kMaxBacklog) restart_();
+    // After tens of seconds with no events at all the 32-bit timer may have
+    // wrapped unseen, and the reading looks like it came from the past.
+    const bool lost_track = static_cast<double>(dt) < -timer_hz_;
+    if (dt <= 0 && !lost_track) return;  // duplicate or out of order: ignore
+    // This sensor was silent for too long, or the other one is: start a new
+    // grid with this reading as its first.
+    if (lost_track || static_cast<double>(dt) > kMaxGapSamples * ticks_per_sample_ || c.out.size() > kMaxBacklog)
+      restart_();
   }
   if (!started_) {
     origin_ = t;

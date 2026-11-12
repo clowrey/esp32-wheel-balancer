@@ -144,6 +144,20 @@ TEST_CASE("resampler: lost readings are bridged, a long dropout restarts the gri
   double idx;
   REQUIRE(rs.pop_tach(idx));
   CHECK(idx == doctest::Approx(10.5).epsilon(1e-6));
+
+  // Forty seconds with no events at all: the 32-bit timer has gone more than
+  // half way round, so the next reading looks 13 s old. It must start a new
+  // grid, not be thrown away as out of order.
+  rs.push(0, ticks_at(4.604 + 40.0), 5.0f);
+  CHECK(rs.restarts() == 2);
+  CHECK(rs.take_restart());
+  rs.push(0, ticks_at(4.608 + 40.0), 6.0f);
+  CHECK(rs.pop_frames(a, b, 64) == 2);
+  CHECK(a[0] == doctest::Approx(5.0f));
+
+  // More than a handful of readings lost in a row is not bridged either.
+  rs.push(0, ticks_at(4.608 + 40.0 + 8 / fs), 7.0f);
+  CHECK(rs.restarts() == 3);
 }
 
 TEST_CASE("orders above the usable band read zero") {
@@ -260,7 +274,8 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
     rig.seed = seed++;
     StreamResampler rs;
     rs.configure(kTimerHz, 250.0, 2);
-    RevolutionAnalyzer an(mpu_rev_config(250.0, rig.dlpf_delay_s));
+    RevolutionAnalyzer an(mpu_rev_config(250.0, 0));
+    const uint32_t delay_ticks = static_cast<uint32_t>(rig.dlpf_delay_s * kTimerHz + 0.5);
     m.start_run();
     RevResult r;
     int passes = 0;
@@ -271,7 +286,7 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
       const double dur = sim::run_hand_spins(
           rig, extra, 1, 300, 190, 30.0,
           [&](int s, uint32_t ticks, float g) {
-            rs.push(s, ticks, g);
+            rs.push(s, ticks - delay_ticks, g);  // stamped when the motion happened, as acq_mpu does
             drain(rs, an);
             while (an.pop(r)) {
               if (job.test_rpm() <= 0 && r.rpm < 245) m.lock_speed(240);  // "LOCK SPEED"

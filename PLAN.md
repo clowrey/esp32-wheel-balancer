@@ -149,8 +149,11 @@ The rule from §4 still holds: every time is a hardware-latched capture value.
   `dsp_resample` interpolates each one onto a uniform grid defined by the
   capture timer (250 Hz by default). Tach edges land on that grid by
   division. Missing readings are bridged; a long dropout restarts the grid.
-- The sensor's low-pass group delay (4.9 ms at 44 Hz) is removed like the
-  PCM1808's delay.
+- Each sensor's low-pass group delay (4.9 ms at 44 Hz) is taken off its
+  readings' timestamps before resampling, the time-domain equivalent of the
+  PCM1808 delay removal.
+- A sensor that goes silent is re-initialised by the task; the bus is
+  clocked free at start in case a reboot cut a transfer short.
 - The sensor bus is not ESPHome's: it is a second I²C port owned by the
   acquisition task, so nothing in `loop()` touches it.
 

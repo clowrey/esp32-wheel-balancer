@@ -176,6 +176,16 @@ def _check_sensor_type(config):
                 "(keep it at or below half the sample rate)",
                 path=[CONF_MPU6050, CONF_FILTER],
             )
+        # Each reading is an 85-clock I2C transfer that has to finish well before
+        # the next reading is due, or it cannot be tied to its timestamp.
+        sensors = 2 if CONF_SENSOR_B in mpu else 1
+        busy = sensors * 85.0 / mpu[CONF_FREQUENCY] * mpu[CONF_SAMPLE_RATE]
+        if busy > 0.5:
+            raise cv.Invalid(
+                f"{sensors} sensor(s) at {mpu[CONF_SAMPLE_RATE]} readings per second need a faster bus than "
+                f"{int(mpu[CONF_FREQUENCY] / 1000)} kHz: raise 'frequency' or lower 'sample_rate'",
+                path=[CONF_MPU6050, CONF_SAMPLE_RATE],
+            )
         if CONF_SENSOR_B in mpu and mpu[CONF_SENSOR_B][CONF_ADDRESS] == mpu[CONF_SENSOR_A][CONF_ADDRESS]:
             raise cv.Invalid(
                 "sensor_a and sensor_b need different addresses (tie AD0 high on one board for 0x69)",
