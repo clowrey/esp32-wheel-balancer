@@ -1115,11 +1115,12 @@ void BalancerUi::update_live_() {
   const char *unit = unit_of(model_);
   for (int c = 0; c < 2; c++) {
     const double a = std::abs(lv.v[c]);
-    lv_label_set_text(l_ch_[c], fmt("1x  %.*f %s @ %.0f°\nRMS %.4f g   peak %.0f%% FS", decimals_for(a), a, unit,
-                                    arg_deg(lv.v[c]), lv.rms_g[c], lv.peak_frac[c] * 100)
+    lv_label_set_text(l_ch_[c], fmt("1x  %.*f %s @ %.0f°\nRMS %.4f g   peak %.0f%% FS\nfailed reads %u, missed %u",
+                                    decimals_for(a), a, unit, arg_deg(lv.v[c]), lv.rms_g[c], lv.peak_frac[c] * 100,
+                                    lv.read_errors[c], lv.missed[c])
                                     .c_str());
   }
-  lv_label_set_text(l_diag_, fmt("%s\nsample rate %.1f Hz %s\ntach pulses %u, glitches %u\nrestarts %u, missed readings %u\n"
+  lv_label_set_text(l_diag_, fmt("%s\nsample rate %.1f Hz %s\ntach pulses %u, tach glitches %u\nrestarts %u, missed + failed %u\n"
                                  "average of last %d revolutions",
                                  lv.acq_ok ? "acquisition running"
                                            : (model_->simulate() ? "demo mode (no sensors)" : "SENSORS NOT RUNNING"),

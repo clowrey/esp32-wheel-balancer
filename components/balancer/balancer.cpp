@@ -138,6 +138,8 @@ void BalancerComponent::update_acq_status_() {
   for (int c = 0; c < 2; c++) {
     live_.rms_g[c] = st.rms_g[c].load();
     live_.peak_frac[c] = st.peak_frac[c].load();
+    live_.read_errors[c] = st.read_errors[c].load();
+    live_.missed[c] = st.missed[c].load();
     live_.raw_n[c] = mpu_->copy_raw(c, live_.raw[c], bal::LiveData::kRawPts);
   }
 #endif

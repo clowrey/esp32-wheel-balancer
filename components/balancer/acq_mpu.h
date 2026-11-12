@@ -38,6 +38,8 @@ struct AcqStatus {
   std::atomic<float> measured_fs{0};
   std::atomic<float> rms_g[2];
   std::atomic<float> peak_frac[2];  // largest |sample| / full scale over the last second
+  std::atomic<uint32_t> read_errors[2] = {};  // I2C reads that failed, per sensor
+  std::atomic<uint32_t> missed[2] = {};       // readings overwritten before they could be read, per sensor
   std::atomic<bool> aligned{false};
   std::atomic<bool> running{false};
 };
@@ -133,6 +135,7 @@ class MpuAcquisition {
   uint32_t missed_ = 0;
   uint32_t i2c_errors_ = 0;
   uint32_t sensor_errors_[2] = {0, 0};
+  uint32_t missed_s_[2] = {0, 0};
   // A sensor that fails kFailBackoff reads in a row is only tried every
   // kBackoffMs until it answers, so its timeouts can't starve the other one.
   static constexpr int kFailBackoff = 5;

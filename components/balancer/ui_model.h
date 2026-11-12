@@ -25,6 +25,8 @@ struct LiveData {
   bool acq_ok = false;         // acquisition running
   bool aligned = false;        // timebase locked
   unsigned resyncs = 0, overflows = 0, glitches = 0, tach_pulses = 0;
+  unsigned read_errors[kChannels] = {0, 0};  // failed I2C reads, per sensor
+  unsigned missed[kChannels] = {0, 0};       // readings skipped because the task fell behind
   // The latest raw readings of each sensor's measured axis (g, oldest first),
   // for the LIVE screen's raw trace. raw_n is 0 when there are none (demo).
   static constexpr int kRawPts = 500;
