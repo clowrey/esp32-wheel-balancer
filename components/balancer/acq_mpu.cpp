@@ -33,7 +33,7 @@ constexpr uint8_t kRegWhoAmI = 0x75;
 constexpr int kI2cTimeoutMs = 5;
 
 // Low-pass choices: DLPF_CFG value and the accelerometer's group delay,
-// which is removed from the phase like the PCM1808's delay is. The MPU-6050
+// which is removed from the phase. The MPU-6050
 // column is from its register map. The MPU-6500-family column is less
 // certain (register-map revisions disagree); it only shifts the displayed
 // phase, which the trial runs calibrate out.

@@ -1,15 +1,13 @@
 # Tire rig: MPU-6050 sensors on a leaf-spring stand
 
-A quick way to balance car wheels with parts on hand: the same 7" P4 board and
-touchscreen wizard as the main balancer, with two GY-521 (MPU-6050) boards in
-place of the PCM1808 front end and IEPE sensors. Firmware:
-`balancer-tire.yaml` (and `balancer-tire-demo.yaml`, a simulated wheel for
-trying the procedure with nothing connected).
+A way to balance car wheels with parts on hand: the 7" P4 board and its
+touchscreen wizard, with two GY-521 (MPU-6050) accelerometer boards and a
+tach. Firmware: `balancer-tire.yaml` (and `balancer-tire-demo.yaml`, a
+simulated wheel for trying the procedure with nothing connected).
 
 It works because a wheel is slow, heavy and usually well out of balance, and
-because the rig is soft, so the hub moves a lot. It is not a substitute for
-the IEPE path on stiff stands or fast rotors: the MPU-6050 is about 50 times
-noisier than a 607A11.
+because the rig is soft, so the hub moves a lot. MEMS sensors this noisy are
+not a good fit for stiff stands or fast rotors.
 
 ## Wiring (JP1, the 26-pin IDC header on the back of the board)
 
@@ -47,9 +45,7 @@ On the sensor boards:
   a board does not answer (the log says "nothing answers at 0x68"), feed its
   VCC from 5 V instead; SDA, SCL and INT stay at 3.3 V either way.
 
-All pins are set in `balancer-tire.yaml` and can be moved. They are the pins
-the PCM1808 uses in the other firmware, so the two front ends cannot be
-connected at once.
+All pins are set in `balancer-tire.yaml` and can be moved.
 
 For one sensor only (static, single-plane balancing), delete the `sensor_b`
 block. The firmware then limits the job to one plane.
@@ -114,7 +110,7 @@ can sway sideways. Two things matter:
    either one: phase then swings with every small change in speed.
 
 On a soft rig the hub's movement barely depends on speed, so readings stay
-consistent while the wheel coasts down. That is why the tire preset measures
+consistent while the wheel coasts down. That is why the firmware measures
 in micrometres and accepts a wide speed window.
 
 A 20 kg wheel at a few hundred rpm stores real energy. Keep speeds low, make
@@ -122,11 +118,10 @@ sure the wheel cannot leave the spindle, and stand out of its plane.
 
 ## Procedure
 
-![Correction screen for a wheel](../ui/tire/07_result.png)
-
+![Correction screen for a wheel](../ui/07_result.png)
 
 1. **Setup.** Check the wheel mass, and set the trial and correction radius
-   to where your weights sit on the rim (the preset assumes 200 mm, about a
+   to where your weights sit on the rim (the default is 200 mm, about a
    16" rim). Plane 1 is the inner rim edge, plane 2 the outer.
 2. **Run 0.** START, spin the wheel, tap LOCK SPEED at the speed you want to
    measure at (around 240 rpm), then spin it faster than that and let it
@@ -144,9 +139,11 @@ sure the wheel cannot leave the spindle, and stand out of its plane.
 small for its phase to settle, which is normal on a wheel that is already
 close to balanced.
 
-## What the preset sets
+## Starting values
 
-| Setting | Tire preset | Why |
+Set in `ModelCore::load_defaults()` (`ui_core.cpp`).
+
+| Setting | Default | Why |
 |---|---|---|
 | Rotor mass, service speed, grade | 20 kg, 800 rpm, G6.3 | 3.8 g per rim edge at 200 mm; shops aim for 5 g |
 | Trial weight | 30 g at 200 mm | moves the reading clearly without being silly |
@@ -177,8 +174,8 @@ A reading or two lost in a row is bridged; a longer hole restarts the grid. A
 sensor that goes silent (loose plug, brown-out) is set up again automatically
 after a couple of seconds.
 
-From there the same per-revolution analysis, speed window and solver run as
-for the PCM1808. The LIVE screen shows the sensor's measured rate, restarts
+From there the per-revolution analysis, speed window and solver take over.
+The LIVE screen shows the sensor's measured rate, restarts
 of the grid and missed readings.
 
 Limits of this path: all ten orders are valid up to about 670 rpm at 250

@@ -309,7 +309,7 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
   cplx fit[2];
   for (int p = 0; p < 2; p++) {
     const auto &pm = job.result().plane[p].mass;
-    CHECK_FALSE(pm.remove);  // tire preset adds weights
+    CHECK_FALSE(pm.remove);  // wheel defaults add weights
     fit[p] = unbalance(pm.mass_g, job.config().plane[p].corr_radius_mm, job.to_internal_angle(pm.angle_deg));
     const cplx want = -rig.u0[p];
     const double amp_err = std::abs(std::abs(fit[p]) / std::abs(want) - 1.0);

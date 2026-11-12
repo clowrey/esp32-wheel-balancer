@@ -1,4 +1,4 @@
-# Shared by every balancer firmware for the Guition JC1060P470C: board,
+# Shared by the balancer firmware for the Guition JC1060P470C: board,
 # network, display and the local component. The including file supplies the
 # substitutions (name, friendly_name) and its own `balancer:` block.
 esphome:

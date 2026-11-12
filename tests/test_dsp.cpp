@@ -208,7 +208,7 @@ TEST_CASE("splitting onto fixed positions reproduces the vector") {
   CHECK(s.pos_b == 2);
 }
 
-TEST_CASE("ISO limit, trial-weight helper and drill depth match PLAN §6.1") {
+TEST_CASE("ISO limit, trial-weight helper and drill depth for a 1 hp motor rotor") {
   CHECK(iso_uper_gmm(2.5, 3.5, 1750) == doctest::Approx(47.75).epsilon(0.001));
   const double trial = suggest_trial_gmm(3.5, 1500, 0.1);
   CHECK(trial == doctest::Approx(139.2).epsilon(0.002));
