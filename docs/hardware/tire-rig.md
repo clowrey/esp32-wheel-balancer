@@ -19,13 +19,16 @@ marked edge (wire 1 = pin 1).
 |---|---|---|
 | 1 or 3 | 3V3 | VCC on both GY-521 boards |
 | 5 | GND | GND on both boards |
-| 7 | GPIO1 | SDA on both boards |
-| 9 | GPIO2 | SCL on both boards |
-| 11 | GPIO3 | INT on sensor A |
-| 13 | GPIO4 | INT on sensor B |
+| 7 | GPIO1 | SDA on sensor A |
+| 9 | GPIO2 | SCL on sensor A |
+| 10 | GPIO47 | INT on sensor A |
+| 11 | GPIO3 | SDA on sensor B |
+| 13 | GPIO4 | SCL on sensor B |
+| 12 | GPIO46 | INT on sensor B |
 | 16 | GND | tach sensor 0 V (LX-101 blue) and the negative of its supply |
 | 18 | 3V3 | top of the tach pull-up resistor |
 | 19 | GPIO32 | tach signal (LX-101 black) |
+| 17 | GPIO20 | tach teach: base resistor of the transistor that pulls LX-101 pink low (optional) |
 
 Leave the other wires unconnected. Pins 2 and 4 (VOUT-BAT) and the C6 pins on
 the even side are not used.
@@ -34,10 +37,19 @@ On the sensor boards:
 
 - **INT** needs a wire on each board (the hole next to AD0). The firmware
   timestamps every reading from it.
-- **AD0** on sensor B goes to its VCC pin, which moves it to address 0x69.
-  Leave AD0 open on sensor A (0x68).
+- Each sensor has its **own I2C bus** (SDA/SCL pairs above), so one that
+  hangs or fails can't stall the other, and the log names the failing one.
+  Don't join the two buses.
+- **AD0** on sensor B goes to its VCC pin (address 0x69), as set in the YAML.
+  On separate buses both boards could stay at 0x68: change sensor B's
+  `address` in the YAML to match if you leave its AD0 open. Leave AD0 open on
+  sensor A (0x68).
 - XDA and XCL stay unconnected.
-- The boards carry their own I2C pull-ups, so none are needed at the P4.
+- The boards carry their own I2C pull-ups (4.7 kΩ, marked 472, is a good
+  value), so none are needed at the P4.
+- Sensor B's bus has to stay on GPIO0..15: it runs on the P4's low-power I2C
+  controller, the only one left (the touch panel and sensor A use the other
+  two).
 - Keep the sensor leads short, around a metre, and run a ground wire with
   them. If the LIVE screen's "missed readings" count climbs steadily, set
   `frequency: 100kHz` in the YAML.
@@ -55,10 +67,14 @@ block. The firmware then limits the job to one plane.
 - Fix each board rigidly to a bearing housing: screws through the two
   mounting holes, or epoxy. Foam tape and loose zip ties add their own wobble.
 - Sensor A goes on the bearing next to the wheel, sensor B on the far one.
-- The **X arrow** on the board must point along the motion being measured:
-  horizontal, at right angles to the shaft. Point both boards the same way.
-  If one has to face the other way, flip it under Settings, "Sensor B
-  polarity". To use a different axis set `axis: Y` or `axis: Z` in the YAML.
+- The firmware reads the **Z axis**, which runs straight through the board
+  (underside to component side). Mount each board flat against a vertical
+  face of the bearing housing, so the board faces along the motion being
+  measured: horizontal, at right angles to the shaft. Face both boards the
+  same way (component sides both pointing the same direction). If one has to
+  face the other way, flip it under Settings, "Sensor B polarity". To use an
+  in-plane axis instead, set `axis: X` or `axis: Y` in the YAML; the X and Y
+  arrows are printed on the board.
 - Tie the leads down a few centimetres from the board so they cannot tug on
   it.
 
@@ -74,7 +90,7 @@ so the signal wire can be pulled up to the P4's 3.3 V directly.
 | Blue | 0 V | supply negative **and** JP1 pin 16 (GND) |
 | Black | Output 1 (NPN open collector) | JP1 pin 19 (GPIO32) |
 | White | Output 2 (inverse of output 1) | not used: insulate it |
-| Pink | Teaching input | not used: insulate it, teach with the buttons |
+| Pink | Teaching input | collector of the teach transistor (below), or insulate it and teach with the buttons |
 
 - Fit a 4.7 kΩ resistor from pin 19 to pin 18 (3V3). The firmware's internal
   pull-up is on as well, but it is weak for two metres of cable.
@@ -88,6 +104,27 @@ so the signal wire can be pulled up to the P4's 3.3 V directly.
   low). Whichever way the teaching ends up, there is one such edge per
   revolution, and that edge is the 0° mark for every angle the screen shows.
 - Response time is 45 µs: a fixed 0.06° at 4 revolutions a second.
+
+### Teaching from the screen (optional)
+
+The pink wire is the LX-101's external teach input. Pulled below 2 V it acts
+like holding the teach key; left open it sits at about 5 V inside the sensor
+(10 kΩ), so it must **not** go straight to a P4 pin. Switch it with a small
+transistor:
+
+- GPIO20 (JP1 pin 17) → 1 kΩ → base of an NPN (2N3904, BC547).
+- Emitter → GND (JP1 pin 16, the same 0 V as the blue wire).
+- Collector → pink.
+
+A 2N7000 N-MOSFET works the same way: gate through 100 Ω to GPIO20, a 100 kΩ
+from gate to GND, drain to pink, source to GND.
+
+`teach_pin: GPIO20` under `tach:` in the YAML turns on the **TEACH TACH (hold)**
+button on the Settings screen. The teach input is active for as long as the
+button is held (at most 20 s), so use it exactly as you would the sensor's own
+key, for example held while the mark passes a few times in full-auto teaching.
+Panasonic's datasheet gives the input levels but not the external-input
+sequence for each teach mode; check the LX-101 instruction sheet for that.
 
 Any other sensor that gives one clean pulse per revolution works the same
 way, as long as its output is open-collector or 3.3 V logic.

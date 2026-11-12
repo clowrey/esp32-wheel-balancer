@@ -739,7 +739,23 @@ void BalancerUi::build_live_() {
     for (int i = 0; i <= kWaveBins; i++) l_wave_pts_[c][i] = {0, 0};
     l_wave_[c] = line(wp, l_wave_pts_[c], kWaveBins + 1, chc[c], 2);
   }
+  // Raw readings, sharing the bottom-right slot with the orders.
+  l_raw_box_ = box(s, 356, 302, 652, 226);
+  text(l_raw_box_, "RAW  (mean removed)", F14, kMuted, 16, 10);
+  l_raw_info_ = text(l_raw_box_, "", F14, kMuted, 200, 10);
+  lv_obj_t *mid = lv_obj_create(l_raw_box_);  // zero line
+  lv_obj_set_pos(mid, 16, 125);
+  lv_obj_set_size(mid, 620, 1);
+  lv_obj_set_style_bg_color(mid, col(kPanel2), 0);
+  lv_obj_set_style_border_width(mid, 0, 0);
+  for (int c = 0; c < 2; c++) {
+    for (int i = 0; i < LiveData::kRawPts; i++) l_raw_pts_[c][i] = {16, 125};
+    l_raw_[c] = line(l_raw_box_, l_raw_pts_[c], LiveData::kRawPts, chc[c], 1);
+  }
+  set_visible(l_raw_box_, false);
+
   lv_obj_t *op = box(s, 356, 302, 652, 226);
+  l_orders_box_ = op;
   text(op, "ORDERS  1x - 10x", F14, kMuted, 16, 10);
   for (int h = 0; h < kMaxOrder; h++) {
     for (int c = 0; c < 2; c++) {
@@ -761,6 +777,19 @@ void BalancerUi::build_live_() {
   l_spin_ = button_(s, "SPIN", F20, [this]() { model_->sim_spin(); }, col(0x7c3aed));
   lv_obj_set_pos(l_spin_, 232, 536);
   lv_obj_set_size(l_spin_, 200, 52);
+  l_view_btn_ = button_(
+      s, "Raw readings", F20,
+      [this]() {
+        l_show_raw_ = !l_show_raw_;
+        update_live_();
+      },
+      col(kPanel2));
+  lv_obj_set_pos(l_view_btn_, 592, 536);
+  lv_obj_set_size(l_view_btn_, 200, 52);
+  l_pclog_btn_ = button_(
+      s, "PC log: off", F20, [this]() { model_->set_pc_log(!model_->pc_log()); update_live_(); }, col(kPanel2));
+  lv_obj_set_pos(l_pclog_btn_, 808, 536);
+  lv_obj_set_size(l_pclog_btn_, 200, 52);
 }
 
 void BalancerUi::build_settings_() {
@@ -811,6 +840,7 @@ void BalancerUi::build_settings_() {
                      "Polarity: flip a sensor that is\nmounted facing the other way.\n\n"
                      "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
                      "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
+                     "TEACH TACH: hold it like the teach\nkey on the LX-101 tach sensor.\n\n"
                      "Changes apply immediately.\nSAVE keeps them after a reboot.",
                      F20, kMuted, 16, 14);
   (void) t;
@@ -818,6 +848,27 @@ void BalancerUi::build_settings_() {
   lv_obj_t *b = button_(s, LV_SYMBOL_HOME "  Home", F20, [this]() { show(HOME); }, col(kPanel2));
   lv_obj_set_pos(b, 16, 536);
   lv_obj_set_size(b, 200, 52);
+  // Press and hold: the sensor's teach input stays active for as long as the
+  // button is held, exactly like holding the key on the sensor.
+  s_teach_btn_ = button_(s, "TEACH TACH (hold)", F20, [this]() {
+    if (!model_->has_tach_teach()) toast_("No teach pin: set 'teach_pin' under 'tach' in the YAML.");
+  }, col(kPanel2));
+  lv_obj_set_pos(s_teach_btn_, 232, 536);
+  lv_obj_set_size(s_teach_btn_, 300, 52);
+  lv_obj_add_event_cb(
+      s_teach_btn_,
+      [](lv_event_t *e) {
+        auto *ui = static_cast<BalancerUi *>(lv_event_get_user_data(e));
+        const lv_event_code_t code = lv_event_get_code(e);
+        if (!ui->model_->has_tach_teach()) return;
+        const bool on = code == LV_EVENT_PRESSED;
+        if (code != LV_EVENT_PRESSED && code != LV_EVENT_RELEASED && code != LV_EVENT_PRESS_LOST) return;
+        ui->model_->set_tach_teach(on);
+        lv_label_set_text(lv_obj_get_child(ui->s_teach_btn_, 0), on ? "TEACHING..." : "TEACH TACH (hold)");
+        lv_obj_set_style_bg_color(ui->s_teach_btn_, col(on ? kAmber : kPanel2), 0);
+      },
+      LV_EVENT_ALL, this);
+
   b = button_(s, LV_SYMBOL_SAVE "  SAVE", F28, [this]() {
     model_->apply_settings(true);
     toast_("Settings saved.");
@@ -1094,6 +1145,43 @@ void BalancerUi::update_live_() {
     for (int h = 0; h < kMaxOrder; h++)
       lv_bar_set_value(l_bars_[c][h], static_cast<int32_t>(lv.order_amp[c][h] / omx * 1000), LV_ANIM_OFF);
   set_visible(l_spin_, model_->simulate());
+
+  // Raw readings: box 652x226, drawing area x 16..636, y 40..210. Each trace
+  // has its own mean removed (gravity differs with tilt) and both share one
+  // scale, so their sizes compare directly.
+  set_visible(l_orders_box_, !l_show_raw_);
+  set_visible(l_raw_box_, l_show_raw_);
+  lv_label_set_text(lv_obj_get_child(l_view_btn_, 0), l_show_raw_ ? "Orders" : "Raw readings");
+  set_visible(l_pclog_btn_, !model_->simulate());
+  lv_label_set_text(lv_obj_get_child(l_pclog_btn_, 0), model_->pc_log() ? "PC log: ON" : "PC log: off");
+  lv_obj_set_style_bg_color(l_pclog_btn_, col(model_->pc_log() ? 0x15803d : kPanel2), 0);
+  if (!l_show_raw_) return;
+  const int n = std::max(lv.raw_n[0], lv.raw_n[1]);
+  if (n < 2) {
+    lv_label_set_text(l_raw_info_, model_->simulate() ? "no raw readings in demo mode" : "no readings yet");
+    return;
+  }
+  float mean[2] = {0, 0}, rmx = 1e-4f;
+  for (int c = 0; c < 2; c++) {
+    if (lv.raw_n[c] == 0) continue;
+    for (int i = 0; i < lv.raw_n[c]; i++) mean[c] += lv.raw[c][i];
+    mean[c] /= lv.raw_n[c];
+    for (int i = 0; i < lv.raw_n[c]; i++) rmx = std::max(rmx, std::fabs(lv.raw[c][i] - mean[c]));
+  }
+  const double span_s = lv.fs > 1 ? n / lv.fs : 0;
+  lv_label_set_text(l_raw_info_, fmt("+/-%.1f mg, %.1f s   A %+.3f g  B %+.3f g", rmx * 1000, span_s, mean[0], mean[1])
+                                     .c_str());
+  for (int c = 0; c < 2; c++) {
+    const int m = lv.raw_n[c];
+    for (int i = 0; i < LiveData::kRawPts; i++) {
+      // Right-aligned: the newest reading is at the right edge.
+      const int k = i - (LiveData::kRawPts - m);
+      const float v = (m > 0 && k >= 0) ? lv.raw[c][k] - mean[c] : 0.0f;
+      l_raw_pts_[c][i] = {static_cast<lv_value_precise_t>(16 + i * 620 / (LiveData::kRawPts - 1)),
+                          static_cast<lv_value_precise_t>(125 - v / rmx * 80)};
+    }
+    lv_line_set_points(l_raw_[c], l_raw_pts_[c], LiveData::kRawPts);
+  }
 }
 
 }  // namespace bal

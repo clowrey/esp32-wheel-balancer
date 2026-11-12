@@ -73,10 +73,10 @@ CellKeeper-BMS-LCD.
 ### 3.1 Signal chain
 
 ```
-GY-521 A (0x68) ──┐  SDA GPIO1, SCL GPIO2 (own I²C port, read by the acquisition task)
-GY-521 B (0x69) ──┘
-INT A ──► GPIO3 ──► MCPWM capture ch1 (hardware timestamp of data ready)
-INT B ──► GPIO4 ──► MCPWM capture ch2
+GY-521 A (0x68) ──  SDA GPIO1, SCL GPIO2 (HP I²C port, read by the acquisition task)
+GY-521 B (0x69) ──  SDA GPIO3, SCL GPIO4 (its own bus: the LP I²C controller)
+INT A ──► GPIO47 ─► MCPWM capture ch1 (hardware timestamp of data ready)
+INT B ──► GPIO46 ─► MCPWM capture ch2
 Tach  ──► GPIO32 ─► MCPWM capture ch0
 ```
 

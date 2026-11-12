@@ -11,7 +11,7 @@ balancer:
     scl_pin: GPIO2
     sensor_a: {address: 0x68, int_pin: GPIO3, axis: X}
     sensor_b: {address: 0x69, int_pin: GPIO4, axis: X}   # leave out for one sensor
-  tach: {pin: GPIO32, edge: FALLING}
+  tach: {pin: GPIO32, edge: FALLING, teach_pin: GPIO20}
   rpm: {name: "Wheel speed"}
 """
 
@@ -36,6 +36,7 @@ CONF_SAMPLE_RATE = "sample_rate"
 CONF_TACH = "tach"
 CONF_EDGE = "edge"
 CONF_PULLUP = "pullup"
+CONF_TEACH_PIN = "teach_pin"
 CONF_INVERT = "invert"
 CONF_SIMULATE = "simulate"
 CONF_RPM = "rpm"
@@ -56,6 +57,7 @@ CONF_ADDRESS = "address"
 CONF_INT_PIN = "int_pin"
 CONF_AXIS = "axis"
 CONF_MAX_SPEED_CHANGE = "max_speed_change"
+CONF_PC_LOG = "pc_log"
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
 
@@ -87,6 +89,9 @@ TACH_SCHEMA = cv.Schema(
         cv.Optional(CONF_PIN, default=32): pins.internal_gpio_input_pin_number,
         cv.Optional(CONF_EDGE, default="RISING"): cv.one_of("RISING", "FALLING", upper=True),
         cv.Optional(CONF_PULLUP, default=True): cv.boolean,
+        # Drives the sensor's teach input (LX-101 pink wire) through an NPN
+        # transistor or N-MOSFET: high = teach. Never wire it to pink directly.
+        cv.Optional(CONF_TEACH_PIN): pins.internal_gpio_output_pin_number,
     }
 )
 
@@ -98,6 +103,11 @@ MPU_SENSOR_SCHEMA = cv.Schema(
         cv.Optional(CONF_AXIS, default="X"): cv.enum(AXES, upper=True),
         # Flip the sign if the board is mounted the other way round (also on the settings screen).
         cv.Optional(CONF_INVERT, default=False): cv.boolean,
+        # Sensor B only: its own I2C bus, so a sensor that hangs or fails
+        # can't stall the other. It runs on the P4's LP I2C controller, which
+        # only reaches GPIO0..15. Leave both out to share sensor A's bus.
+        cv.Optional(CONF_SDA_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_SCL_PIN): pins.internal_gpio_output_pin_number,
     }
 )
 
@@ -128,7 +138,26 @@ def _check_mpu(config):
         )
     # Each reading is an 85-clock I2C transfer that has to finish well before
     # the next reading is due, or it cannot be tied to its timestamp.
-    sensors = 2 if CONF_SENSOR_B in mpu else 1
+    for key in (CONF_SDA_PIN, CONF_SCL_PIN):
+        if key in mpu[CONF_SENSOR_A]:
+            raise cv.Invalid(
+                f"sensor_a uses the bus pins set above; '{key}' is only for sensor_b", path=[CONF_MPU6050, CONF_SENSOR_A, key]
+            )
+    own_bus = False
+    if CONF_SENSOR_B in mpu:
+        b = mpu[CONF_SENSOR_B]
+        if (CONF_SDA_PIN in b) != (CONF_SCL_PIN in b):
+            raise cv.Invalid("set both sda_pin and scl_pin for sensor_b, or neither", path=[CONF_MPU6050, CONF_SENSOR_B])
+        own_bus = CONF_SDA_PIN in b
+        if own_bus:
+            for key in (CONF_SDA_PIN, CONF_SCL_PIN):
+                if b[key] > 15:
+                    raise cv.Invalid(
+                        f"sensor_b's own bus runs on the P4's LP I2C controller, which only reaches GPIO0..15 "
+                        f"(GPIO{b[key]} given)",
+                        path=[CONF_MPU6050, CONF_SENSOR_B, key],
+                    )
+    sensors = 2 if CONF_SENSOR_B in mpu and not own_bus else 1  # sensors sharing one bus
     busy = sensors * 85.0 / mpu[CONF_FREQUENCY] * mpu[CONF_SAMPLE_RATE]
     if busy > 0.5:
         raise cv.Invalid(
@@ -136,7 +165,11 @@ def _check_mpu(config):
             f"{int(mpu[CONF_FREQUENCY] / 1000)} kHz: raise 'frequency' or lower 'sample_rate'",
             path=[CONF_MPU6050, CONF_SAMPLE_RATE],
         )
-    if CONF_SENSOR_B in mpu and mpu[CONF_SENSOR_B][CONF_ADDRESS] == mpu[CONF_SENSOR_A][CONF_ADDRESS]:
+    if (
+        CONF_SENSOR_B in mpu
+        and not own_bus
+        and mpu[CONF_SENSOR_B][CONF_ADDRESS] == mpu[CONF_SENSOR_A][CONF_ADDRESS]
+    ):
         raise cv.Invalid(
             "sensor_a and sensor_b need different addresses (tie AD0 high on one board for 0x69)",
             path=[CONF_MPU6050, CONF_SENSOR_B, CONF_ADDRESS],
@@ -157,6 +190,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_MPU6050): MPU6050_SCHEMA,
             # Largest speed change from one revolution to the next that still counts.
             cv.Optional(CONF_MAX_SPEED_CHANGE): cv.percentage,
+            # Stream every raw reading to the USB log from boot (tools/mpu_log.py).
+            # It can also be switched on the LIVE screen.
+            cv.Optional(CONF_PC_LOG, default=False): cv.boolean,
             cv.Optional(CONF_RPM): sensor.sensor_schema(
                 unit_of_measurement="rpm",
                 icon="mdi:rotate-right",
@@ -190,8 +226,11 @@ async def to_code(config):
 
     tach = config[CONF_TACH]
     cg.add(var.set_tach(tach[CONF_PIN], tach[CONF_EDGE] == "FALLING", tach[CONF_PULLUP]))
+    if CONF_TEACH_PIN in tach:
+        cg.add(var.set_tach_teach_pin(tach[CONF_TEACH_PIN]))
     cg.add(var.set_simulate(config[CONF_SIMULATE]))
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
+    cg.add(var.set_pc_log_at_boot(config[CONF_PC_LOG]))
     if CONF_MAX_SPEED_CHANGE in config:
         cg.add(var.set_max_speed_change(config[CONF_MAX_SPEED_CHANGE]))
     mpu = config[CONF_MPU6050]
@@ -213,6 +252,8 @@ async def to_code(config):
                     idx, int(sens[CONF_ADDRESS]), sens[CONF_INT_PIN], AXES[str(sens[CONF_AXIS])], sens[CONF_INVERT]
                 )
             )
+            if CONF_SDA_PIN in sens:
+                cg.add(var.set_mpu_bus_b(sens[CONF_SDA_PIN], sens[CONF_SCL_PIN]))
 
     for key, setter in (
         (CONF_RPM, "set_rpm_sensor"),

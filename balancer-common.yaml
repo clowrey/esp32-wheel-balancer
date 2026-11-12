@@ -24,9 +24,19 @@ external_components:
 packages:
   hardware: !include hardware_guition_jc1060p470.yaml
 
+# The raw stream to a PC (LIVE screen "PC log", tools/mpu_log.py) logs about
+# 50 lines a second from the acquisition task; give that task's log buffer
+# room for a slow UI redraw.
+logger:
+  task_log_buffer_size: 8192
+
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  power_save_mode: none
+  # A balancer runs standalone: never restart because Wi-Fi or Home Assistant
+  # is missing (the default reboots after 15 min and would lose a run).
+  reboot_timeout: 0s
   ap:
     ssid: "${friendly_name} Fallback"
 
@@ -35,6 +45,7 @@ captive_portal:
 api:
   encryption:
     key: !secret api_encryption_key
+  reboot_timeout: 0s
 
 ota:
   - platform: esphome

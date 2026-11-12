@@ -44,7 +44,10 @@ struct AcqStatus {
 
 struct MpuConfig {
   int i2c_port = -1;            // -1: first free port (ESPHome's own bus has port 0)
-  int pin_sda = -1, pin_scl = -1;
+  int pin_sda = -1, pin_scl = -1;  // sensor A's bus (and B's, unless B has its own)
+  // Optional separate bus for sensor B, on the P4's LP I2C controller, which
+  // only reaches GPIO0..15. -1: B shares sensor A's bus.
+  int pin_sda_b = -1, pin_scl_b = -1;
   uint32_t i2c_hz = 400000;
   int sensors = 2;              // 1: sensor A only (single-plane balancing)
   uint8_t address[2] = {0x68, 0x69};
@@ -74,6 +77,16 @@ class MpuAcquisition {
   const char *chip_name(int ch) const { return chip_[ch]; }
   double filter_delay_s(int ch) const { return delay_s_[ch]; }
 
+  // The latest readings of one sensor's measured axis in g, oldest first.
+  // Returns how many were copied (up to max and kRawLen).
+  static constexpr int kRawLen = 1024;
+  int copy_raw(int ch, float *out, int max) const;
+  // Stream every reading (all three axes, raw counts, capture timestamps) to
+  // the log for a PC to record; see tools/mpu_log.py. Lines are tagged
+  // "mpu.raw": "MPU A <t0_us> <n> dt_us,x,y,z ..." plus one "MPU CFG" line.
+  void set_stream(bool on);
+  bool streaming() const { return stream_.load(); }
+
   // --- internals used by the ISR trampoline ---
   struct Event {
     uint8_t kind;     // 0 tach, 1 sensor A ready, 2 sensor B ready
@@ -87,6 +100,7 @@ class MpuAcquisition {
   static void task_trampoline_(void *arg);
   void task_();
   bool setup_i2c_();
+  bool probe_(int s, int tries);  // probe, clearing the bus between tries
   bool setup_sensor_(int s);
   bool setup_capture_();
   bool write_reg_(int s, uint8_t reg, uint8_t value);
@@ -98,7 +112,9 @@ class MpuAcquisition {
   RevolutionAnalyzer analyzer_;
   QueueHandle_t rev_queue_ = nullptr;
   TaskHandle_t task_handle_ = nullptr;
-  i2c_master_bus_t *bus_ = nullptr;
+  i2c_master_bus_t *bus_[2] = {nullptr, nullptr};
+  int bus_of_[2] = {0, 0};  // which bus each sensor is on
+  bool new_bus_(int b, int sda, int scl, bool low_power);
   i2c_master_dev_t *dev_[2] = {nullptr, nullptr};
   mcpwm_cap_timer_t *cap_timer_ = nullptr;
   mcpwm_cap_channel_t *chan_[3] = {nullptr, nullptr, nullptr};
@@ -116,6 +132,38 @@ class MpuAcquisition {
   uint32_t stat_n_[2] = {0, 0};
   uint32_t missed_ = 0;
   uint32_t i2c_errors_ = 0;
+  uint32_t sensor_errors_[2] = {0, 0};
+  // A sensor that fails kFailBackoff reads in a row is only tried every
+  // kBackoffMs until it answers, so its timeouts can't starve the other one.
+  static constexpr int kFailBackoff = 5;
+  static constexpr int kBackoffMs = 200;
+  int fail_streak_[2] = {0, 0};
+  uint32_t next_try_ms_[2] = {0, 0};
+  uint32_t backoff_skips_[2] = {0, 0};
+  bool silent_logged_[2] = {false, false};
+
+  // Recent readings of the measured axis (g, polarity applied) for the LIVE
+  // screen. Written by the task only; raw_n_ counts every reading.
+  float raw_[2][kRawLen] = {};
+  std::atomic<uint32_t> raw_n_[2] = {};
+
+  // Raw stream to the PC log (see set_stream).
+  // Readings per log line. ESPHome cuts a message from another task at about
+  // 255 characters; 6 readings at their longest (27 characters each) fit.
+  static constexpr int kBatch = 6;
+  struct StreamBatch {
+    uint64_t t0_us = 0;
+    int n = 0;
+    uint32_t dt_us[kBatch];
+    int16_t xyz[kBatch][3];
+  };
+  void stream_push_(int s, uint32_t ticks, const int16_t xyz[3]);
+  std::atomic<bool> stream_{false};
+  std::atomic<bool> stream_reset_{false};
+  StreamBatch batch_[2];
+  bool stream_ticks_init_ = false;
+  uint32_t stream_last_ticks_ = 0;
+  uint64_t stream_ticks64_ = 0;
 };
 
 }  // namespace bal
