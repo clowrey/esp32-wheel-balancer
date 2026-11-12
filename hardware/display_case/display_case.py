@@ -125,6 +125,16 @@ class CaseParams:
     tab_hole_d: float = 4.5            # M4 / #8 clearance; 0 for no holes
     tab_holes: int = 2                 # holes per tab
     tab_hole_edge: float = 10.0        # end holes' centre distance from the tab ends
+    # Zip-tie anchors for the harness at the cable slot: a pair of slots
+    # through the tab on that side (straddling the cable, with a groove on the
+    # back face so the tie sits below the mounting surface) and a tie bridge
+    # on the inside of the back wall.
+    zip_ties: bool = True
+    zip_slot_w: float = 5.0            # along X, takes ties up to 4.8 mm wide
+    zip_slot_t: float = 2.2            # along Y
+    zip_spacing: float = 20.0          # centre to centre across the cable
+    zip_groove: float = 1.8            # depth of the groove in the tab's back face
+    zip_bridge_in: float = 12.0        # inside bridge: distance from the inner wall face
 
 
 def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
@@ -228,6 +238,33 @@ def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
                     case -= Pos(hx, hy, total_z - p.tab_thk - 1) * Cylinder(
                         p.tab_hole_d / 2, p.tab_thk + 2, align=(Align.CENTER, Align.CENTER, Align.MIN)
                     )
+
+    # ---- zip-tie anchors next to the cable slot ------------------------------
+    if p.zip_ties and p.cable_slot:
+        side = 1 if p.cable_slot_side == "+x" else -1
+        slot_y = (b.hdr_y0 + b.hdr_y1) / 2
+        # Outside: on the tab, where the harness lies after leaving the slot.
+        if p.tabs:
+            zx = side * (out_w / 2 + p.tab_out / 2)
+            for dy in (-p.zip_spacing / 2, p.zip_spacing / 2):
+                case -= Pos(zx, slot_y + dy, total_z - p.tab_thk - 1) * Box(
+                    p.zip_slot_w, p.zip_slot_t, p.tab_thk + 2, align=(Align.CENTER, Align.CENTER, Align.MIN)
+                )
+            case -= Pos(zx, slot_y, total_z - p.zip_groove) * Box(
+                p.zip_slot_w, p.zip_spacing + p.zip_slot_t, p.zip_groove + 1,
+                align=(Align.CENTER, Align.CENTER, Align.MIN),
+            )
+        # Inside: a bridge on the back wall with a tunnel along Y (prints as a
+        # short bridge with the case back-wall down).
+        bx = side * (in_w / 2 - p.zip_bridge_in)
+        tun_w, tun_h = p.zip_slot_w + 0.5, 2.6
+        bridge = Pos(bx, slot_y, inner_depth - tun_h - 2.0) * Box(
+            tun_w + 4.0, 8.0, tun_h + 2.0, align=(Align.CENTER, Align.CENTER, Align.MIN)
+        )
+        bridge -= Pos(bx, slot_y, inner_depth - tun_h) * Box(
+            tun_w, 10.0, tun_h + 0.5, align=(Align.CENTER, Align.CENTER, Align.MIN)
+        )
+        case += bridge
 
     return case
 

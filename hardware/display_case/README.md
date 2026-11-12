@@ -49,6 +49,11 @@ python render_preview.py
   the window.
 - 22 x 10 mm cable slot in the side wall next to the JP1 header (the left side
   when you look at the back) for the sensor and tach harness.
+- Zip-tie anchors at the cable slot: two 5 x 2.2 mm slots through the
+  left tab, 20 mm apart on either side of where the harness leaves the slot,
+  with a 1.8 mm groove on the back face so the tie stays below the mounting
+  surface; and a tie bridge on the inside of the back wall 12 mm in from
+  the slot. Both take ties up to 4.8 mm wide.
 - Print back-wall down. No supports. 2.4 mm walls; PETG or PLA is fine.
 
 Coordinates in the script are as seen from the back of the display: +X right,
