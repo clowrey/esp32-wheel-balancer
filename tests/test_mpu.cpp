@@ -180,9 +180,8 @@ TEST_CASE("orders above the usable band read zero") {
   }
 }
 
-TEST_CASE("tire preset: trial helper is capped, wording has no air, one sensor means one plane") {
+TEST_CASE("tire defaults: trial helper is capped, wording has no air, one sensor means one plane") {
   ModelCore m;
-  m.apply_preset(Preset::TIRE);
   BalanceJob &job = m.job();
   const JobConfig &cfg = job.config();
   CHECK(cfg.rotor_mass_kg == doctest::Approx(20));
@@ -199,16 +198,8 @@ TEST_CASE("tire preset: trial helper is capped, wording has no air, one sensor m
   CHECK(job.instruction().find("air") == std::string::npos);
   CHECK(job.instruction().find("216-264 rpm") != std::string::npos);
 
-  // The motor-rotor preset is unchanged by the cap (PLAN §6.1: 3.5 g).
-  m.apply_preset(Preset::MOTOR_ROTOR);
-  m.job().start();
-  m.job().set_test_rpm(1500);
-  CHECK_FALSE(m.job().suggested_trial_capped(0));
-  CHECK(m.job().suggested_trial_g(0) == doctest::Approx(3.48).epsilon(0.01));
-  CHECK(m.job().instruction().find("air") != std::string::npos);
-
   // One sensor: two planes cannot be solved, so the job drops to one.
-  m.apply_preset(Preset::TIRE);
+  m.load_defaults();
   m.job().set_max_planes(1);
   m.job().mutable_config().planes = 2;  // what the setup screen toggle does
   m.job().start();
@@ -245,7 +236,7 @@ TEST_CASE("best-effort readiness after 4x the minimum revolutions") {
 
 // ---------------------------------------------------------------------------
 // End to end: a car wheel on a soft rig, two MPU-6050s, hand spins. Readings
-// go through the resampler and analyzer into ModelCore with the tire preset,
+// go through the resampler and analyzer into ModelCore with the tire defaults,
 // exactly the path the firmware takes, and the wizard is walked to a verify.
 
 TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
@@ -260,8 +251,6 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
   rig.u0[1] = unbalance(25.0, 200, 130);  // 5000 g*mm on the outer rim
 
   ModelCore m;
-  m.apply_preset(Preset::TIRE);
-  m.set_digital_sensor(true);
   BalanceJob &job = m.job();
   job.mutable_config().plane[0].trial_angle_deg = 0;
   job.mutable_config().plane[1].trial_angle_deg = 90;
@@ -320,7 +309,7 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
   cplx fit[2];
   for (int p = 0; p < 2; p++) {
     const auto &pm = job.result().plane[p].mass;
-    CHECK_FALSE(pm.remove);  // tire preset adds weights
+    CHECK_FALSE(pm.remove);  // wheel defaults add weights
     fit[p] = unbalance(pm.mass_g, job.config().plane[p].corr_radius_mm, job.to_internal_angle(pm.angle_deg));
     const cplx want = -rig.u0[p];
     const double amp_err = std::abs(std::abs(fit[p]) / std::abs(want) - 1.0);

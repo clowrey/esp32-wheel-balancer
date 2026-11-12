@@ -24,7 +24,7 @@ struct RevolutionConfig {
   double fs = 16000.0;        // sample rate, Hz
   double min_rpm = 60.0;      // slower revolutions are discarded (gap)
   double max_rpm = 12000.0;   // tach pulses closer than this are glitches
-  double delay_s = 17.4 / 16000.0;  // fixed signal-chain delay to remove (PCM1808 group delay)
+  double delay_s = 17.4 / 16000.0;  // fixed signal-chain delay to remove (filter group delay)
   size_t ring_size = 1u << 15;      // samples kept per channel (power of two)
 };
 

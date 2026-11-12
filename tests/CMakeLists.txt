@@ -13,7 +13,6 @@ set(DSP_SOURCES
   ${COMP}/dsp_measurement.cpp
   ${COMP}/dsp_balance.cpp
   ${COMP}/dsp_job.cpp
-  ${COMP}/dsp_timebase.cpp
   ${COMP}/dsp_resample.cpp
   ${COMP}/dsp_sim.cpp
   ${COMP}/ui_core.cpp   # ModelCore: pure C++, shared with the firmware and ui_preview

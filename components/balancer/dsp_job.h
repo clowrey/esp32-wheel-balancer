@@ -95,10 +95,6 @@ class BalanceJob {
   // times the plane's ISO limit.
   double suggested_trial_g(int plane) const;
   bool suggested_trial_capped(int plane) const;  // the ISO cap is the one that applied
-  // Wording of the spin instruction: air blast (default) or spun by hand /
-  // motor. Not part of JobConfig, so reset() keeps it.
-  void set_air_drive(bool air) { air_drive_ = air; }
-  bool air_drive() const { return air_drive_; }
   // With one sensor only a single-plane (static) balance can be solved.
   void set_max_planes(int n) {
     max_planes_ = n < 2 ? 1 : 2;
@@ -132,7 +128,6 @@ class BalanceJob {
   void fill_plane_(int p, cplx u);
   double plane_iso_limit_gmm_(int p) const;
 
-  bool air_drive_ = true;
   int max_planes_ = 2;
 
   JobConfig cfg_;

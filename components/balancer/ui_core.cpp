@@ -7,10 +7,8 @@
 namespace bal {
 
 ModelCore::ModelCore() {
-  JobConfig cfg;
-  job_.reset(cfg);
   for (int p = 0; p < 2; p++) sim_fitted_[p] = sim_correction_total_[p] = 0;
-  configure_measurement_();
+  load_defaults();
 }
 
 void ModelCore::configure_measurement_() {
@@ -37,52 +35,39 @@ void ModelCore::configure_measurement_() {
   job_.mutable_config().window = settings_.window;
 }
 
-void ModelCore::apply_preset(Preset p) {
-  preset_ = p;
-  JobConfig cfg;        // MOTOR_ROTOR is what the struct defaults describe
+void ModelCore::load_defaults() {
+  // A car wheel: about 20 kg, balanced to 5 g or better per rim edge.
+  // G6.3 at 800 rpm (roughly 100 km/h) allows 750 g*mm per plane, which is
+  // 3.8 g at a 200 mm rim radius.
+  JobConfig cfg;
+  cfg.rotor_mass_kg = 20.0;
+  cfg.service_rpm = 800.0;
+  cfg.grade = 6.3;
+  for (auto &pl : cfg.plane) {
+    pl.trial_mass_g = 30.0;
+    pl.trial_radius_mm = 200.0;
+    pl.corr_radius_mm = 200.0;
+    pl.remove_mode = false;  // stick-on or clip-on weights
+  }
+  // Hand-spun and coasting at a few revolutions per second: few
+  // revolutions fit in a narrow window, and each one slows noticeably.
+  // On a soft rig the displacement barely depends on speed, so a wide
+  // window in displacement units is honest.
   UiSettings st;
-  for (int c = 0; c < kChannels; c++) {  // sensor scaling is not part of a preset
-    st.sens_mv_g[c] = settings_.sens_mv_g[c];
-    st.gain[c] = settings_.gain[c];
-    st.invert[c] = settings_.invert[c];
-  }
-  max_period_change_ = 0.01;
-  best_effort_factor_ = 0;
-  amp_floor_um_ = 0;
-  bool air = true;
-  if (p == Preset::TIRE) {
-    // A car wheel: about 20 kg, balanced to 5 g or better per rim edge.
-    // G6.3 at 800 rpm (roughly 100 km/h) allows 750 g*mm per plane, which is
-    // 3.8 g at a 200 mm rim radius.
-    cfg.rotor_mass_kg = 20.0;
-    cfg.service_rpm = 800.0;
-    cfg.grade = 6.3;
-    for (auto &pl : cfg.plane) {
-      pl.trial_mass_g = 30.0;
-      pl.trial_radius_mm = 200.0;
-      pl.corr_radius_mm = 200.0;
-      pl.remove_mode = false;  // stick-on or clip-on weights
-    }
-    // Hand-spun and coasting at a few revolutions per second: few
-    // revolutions fit in a narrow window, and each one slows noticeably.
-    // On a soft rig the displacement barely depends on speed, so a wide
-    // window in displacement units is honest.
-    st.quantity = Quantity::DISPLACEMENT_UM;
-    st.window = 0.10;
-    st.target_revs = 20;
-    st.max_phase_unc_deg = 3.0;
-    max_period_change_ = 0.03;
-    // MEMS noise: a reading known to 2.5 um is as good as it gets in one or
-    // two spins, and is a few percent of what the tolerance looks like.
-    amp_floor_um_ = 2.5;
-    best_effort_factor_ = 4;
-    air = false;
-  }
+  for (int c = 0; c < kChannels; c++) st.invert[c] = settings_.invert[c];  // set from YAML
+  st.quantity = Quantity::DISPLACEMENT_UM;
+  st.window = 0.10;
+  st.target_revs = 20;
+  st.max_phase_unc_deg = 3.0;
+  max_period_change_ = 0.03;
+  // MEMS noise: a reading known to 2.5 um is as good as it gets in one or
+  // two spins, and is a few percent of what the tolerance looks like.
+  amp_floor_um_ = 2.5;
+  best_effort_factor_ = 4;
   settings_ = st;
   job_.reset(cfg);  // keeps the sensor count limit
-  job_.set_air_drive(air);
-  sim_ = RevSim();  // demo rotor to match
-  if (p == Preset::TIRE) sim_.set_tire();
+  sim_ = RevSim();  // demo wheel to match
+  sim_.set_tire();
   configure_measurement_();
 }
 
@@ -154,17 +139,13 @@ std::string ModelCore::machine_summary() const {
   return buf;
 }
 
-void ModelCore::sim_blast() {
-  if (preset_ == Preset::TIRE) {  // a hand spin: slower, and it coasts for a long time
-    const double t = job_.test_rpm() > 0 ? job_.test_rpm() : 240.0;
-    sim_.blast(t * 1.25, 30.0);
-    return;
-  }
-  const double t = job_.test_rpm() > 0 ? job_.test_rpm() : 1500.0;
-  sim_.blast(t * 1.12, 10.0);
+void ModelCore::sim_spin() {
+  // A hand spin: a quarter above the test speed, then a long coast.
+  const double t = job_.test_rpm() > 0 ? job_.test_rpm() : 240.0;
+  sim_.blast(t * 1.25, 30.0);
 }
 
-// What the operator has fitted for the current step (demo rotor only).
+// What the operator has fitted for the current step (demo wheel only).
 void ModelCore::set_sim_fitted_for_step_() {
   const JobConfig &cfg = job_.config();
   auto fitted_from_result = [&](int p) -> cplx {
@@ -231,12 +212,12 @@ void ModelCore::feed_rev(const RevResult &r, uint32_t now_ms) {
 void ModelCore::tick(uint32_t now_ms) {
   if (simulate_) {
     const double dt = last_tick_ms_ ? std::min<uint32_t>(200, now_ms - last_tick_ms_) / 1000.0 : 0.0;
-    RevResult buf[32];
-    const int n = sim_.step(dt, buf, 32);
-    for (int i = 0; i < n; i++) feed_rev(buf[i], now_ms);
+    if (sim_buf_.empty()) sim_buf_.resize(32);
+    const int n = sim_.step(dt, sim_buf_.data(), static_cast<int>(sim_buf_.size()));
+    for (int i = 0; i < n; i++) feed_rev(sim_buf_[i], now_ms);
     live_.acq_ok = false;
     live_.aligned = true;
-    live_.fs = digital_sensor_ ? 250 : 16000;
+    live_.fs = 250;
     for (int c = 0; c < 2; c++) {
       live_.rms_g[c] = live_revs_.empty() ? 0.0f : static_cast<float>(std::abs(live_revs_.back().o[c][0]) / std::sqrt(2.0));
       live_.peak_frac[c] = 0.02f;

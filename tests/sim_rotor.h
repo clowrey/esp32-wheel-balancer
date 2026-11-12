@@ -1,5 +1,5 @@
 #pragma once
-// Synthetic air-driven rotor for host tests (PLAN Phase 2).
+// Synthetic sample-level rotor for host tests of the DSP (PLAN Phase 2).
 //
 // A rigid rotor on a stand, two correction planes, two accelerometers.
 // The true response is linear: accel(g) = (omega/omega_ref)^2 * A_true * U,

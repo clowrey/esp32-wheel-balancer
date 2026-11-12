@@ -124,7 +124,7 @@ class BalancerUi {
   // measure
   lv_obj_t *m_instr_ = nullptr, *m_step_ = nullptr, *m_rpm_ = nullptr, *m_gauge_ = nullptr, *m_band_ = nullptr;
   lv_obj_t *m_window_ = nullptr, *m_state_ = nullptr, *m_revs_ = nullptr, *m_revs_bar_ = nullptr;
-  lv_obj_t *m_lock_ = nullptr, *m_setspeed_ = nullptr, *m_blast_ = nullptr, *m_accept_ = nullptr;
+  lv_obj_t *m_lock_ = nullptr, *m_setspeed_ = nullptr, *m_spin_ = nullptr, *m_accept_ = nullptr;
   lv_obj_t *m_read_[2] = {};
   PolarView polar_[2];
   // result
@@ -132,7 +132,7 @@ class BalancerUi {
   lv_obj_t *r_verify_ = nullptr;
   DialView dial_[2];
   // live
-  lv_obj_t *l_rpm_ = nullptr, *l_ch_[2] = {}, *l_diag_ = nullptr, *l_blast_ = nullptr;
+  lv_obj_t *l_rpm_ = nullptr, *l_ch_[2] = {}, *l_diag_ = nullptr, *l_spin_ = nullptr;
   lv_obj_t *l_wave_[2] = {};
   lv_point_precise_t l_wave_pts_[2][kWaveBins + 1];
   lv_obj_t *l_bars_[2][kMaxOrder] = {};

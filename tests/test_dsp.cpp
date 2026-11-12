@@ -208,7 +208,7 @@ TEST_CASE("splitting onto fixed positions reproduces the vector") {
   CHECK(s.pos_b == 2);
 }
 
-TEST_CASE("ISO limit, trial-weight helper and drill depth match PLAN §6.1") {
+TEST_CASE("ISO limit, trial-weight helper and drill depth for a 1 hp motor rotor") {
   CHECK(iso_uper_gmm(2.5, 3.5, 1750) == doctest::Approx(47.75).epsilon(0.001));
   const double trial = suggest_trial_gmm(3.5, 1500, 0.1);
   CHECK(trial == doctest::Approx(139.2).epsilon(0.002));
@@ -418,69 +418,6 @@ TEST_CASE("job: single plane, kept trial weight, split positions, instructions")
   const cplx sum = polar_deg(pr.split.mass_a, pr.split.angle_a) + polar_deg(pr.split.mass_b, pr.split.angle_b);
   CHECK(std::abs(sum - polar_deg(pr.mass.mass_g, pr.mass.angle_deg)) < 1e-9);
   CHECK(job.suggested_trial_g(0) == doctest::Approx(3.48).epsilon(0.01));
-}
-
-// ---------------------------------------------------------------------------
-// Tach timebase (LRCK capture + DMA soft catch)
-
-#include <algorithm>
-#include "dsp_timebase.h"
-
-TEST_CASE("timebase maps tach ticks to fractional frame indices across timer wrap") {
- for (bool drop_lrck : {false, true}) {
-  CAPTURE(drop_lrck);
-  const double timer_hz = 80e6;
-  const double fs = 16000.0 * (1.0 + 37e-6);  // real crystal error
-  const double t0 = 0.0123;                   // I2S starts 12.3 ms after the timer
-  const uint32_t tick_offset = 0xFFFFFFFFu - 40000000u;  // wraps 0.5 s in
-  auto ticks_at = [&](double t) { return static_cast<uint32_t>(tick_offset + static_cast<uint64_t>(std::llround(t * timer_hz))); };
-
-  struct Ev { double t; int kind; uint32_t frames; };
-  std::vector<Ev> ev;
-  // LRCK rising edge is half a frame into its frame; the prescaler fires on
-  // the 256th edge, i.e. frames 255, 511, ...
-  for (int k = 0; k < 400; k++) {
-    const int frame = 255 + 256 * k;
-    if (drop_lrck && k % 37 == 20) continue;  // lost capture interrupt
-    ev.push_back({t0 + (frame + 0.5) / fs, 1, 0});
-  }
-  // DMA complete for every 256-frame buffer, 4-9 us late.
-  std::mt19937 rng(5);
-  std::uniform_real_distribution<double> lat(4e-6, 9e-6), when(0.05, 6.0);
-  for (int m = 1; m < 400; m++) ev.push_back({t0 + 256.0 * m / fs + lat(rng), 2, static_cast<uint32_t>(256 * m)});
-  std::vector<double> tach_t;
-  for (int i = 0; i < 200; i++) tach_t.push_back(when(rng));
-  std::sort(tach_t.begin(), tach_t.end());
-  for (double t : tach_t) ev.push_back({t, 0, 0});
-  std::sort(ev.begin(), ev.end(), [](const Ev &a, const Ev &b) { return a.t < b.t; });
-
-  TachTimebase tb;
-  tb.configure(timer_hz, 16000.0, 256);
-  std::vector<double> got;
-  for (auto &e : ev) {
-    if (e.kind == 0) tb.on_tach(ticks_at(e.t));
-    if (e.kind == 1) tb.on_lrck(ticks_at(e.t));
-    if (e.kind == 2) tb.on_soft(ticks_at(e.t), e.frames);
-    double f;
-    while (tb.pop_tach(f)) got.push_back(f);
-  }
-  CHECK(tb.aligned());
-  CHECK(tb.realigns() == 0);
-  CHECK(tb.measured_fs() == doctest::Approx(fs).epsilon(1e-6));
-  // Every tach after alignment (~30 ms in) must land on the right frame.
-  int checked = 0;
-  double worst = 0;
-  for (double f : got) {
-    // find the matching true time
-    double best = 1e9;
-    for (double t : tach_t) best = std::min(best, std::fabs(f - (t - t0) * fs));
-    worst = std::max(worst, best);
-    checked++;
-  }
-  CHECK(checked >= 195);
-  INFO("worst frame error " << worst);
-  CHECK(worst < 0.01);
- }
 }
 
 // ---------------------------------------------------------------------------

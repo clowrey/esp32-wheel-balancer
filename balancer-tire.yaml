@@ -1,6 +1,7 @@
-# Tire balancer: same board and touchscreen as balancer-jc1060p470.yaml, but
-# with two GY-521 (MPU-6050) boards on I2C in place of the PCM1808 front end,
-# and starting values for a car wheel on a soft leaf-spring rig.
+# Tire balancer on the Guition JC1060P470C (ESP32-P4, 7" 1024x600): two
+# GY-521 (MPU-6050) accelerometers on I2C and a tach on the 26-pin header,
+# with starting values for a car wheel on a soft leaf-spring rig.
+# For a bench demo without sensors, flash balancer-tire-demo.yaml instead.
 # Wiring and rig notes: docs/hardware/tire-rig.md
 substitutions:
   name: balancer-tire
@@ -13,8 +14,6 @@ packages:
 balancer:
   id: rotor_balancer
   simulate: ${simulate}
-  preset: tire
-  sensor_type: mpu6050
   mpu6050:
     sda_pin: GPIO1        # JP1 pin 7
     scl_pin: GPIO2        # JP1 pin 9

@@ -1,7 +1,7 @@
 #pragma once
 // What the touchscreen UI needs from the rest of the firmware. The ESPHome
 // component implements this on the device; tools/ui_preview implements it
-// on a PC with the simulated rotor so screens can be rendered to images.
+// on a PC with the simulated wheel so screens can be rendered to images.
 
 #include <string>
 #include <vector>
@@ -20,28 +20,19 @@ struct LiveData {
   double order_amp[kChannels][kMaxOrder] = {};
   float wave[kChannels][kWaveBins] = {};  // g
   float rms_g[kChannels] = {0, 0};
-  float peak_frac[kChannels] = {0, 0};   // of ADC full scale
-  float fs = 0;                // measured sample rate
+  float peak_frac[kChannels] = {0, 0};   // of the sensor's full-scale range
+  float fs = 0;                // measured reading rate
   bool acq_ok = false;         // acquisition running
   bool aligned = false;        // timebase locked
   unsigned resyncs = 0, overflows = 0, glitches = 0, tach_pulses = 0;
 };
 
 struct UiSettings {
-  double sens_mv_g[kChannels] = {100, 100};
-  double gain[kChannels] = {10, 10};
   bool invert[kChannels] = {false, false};
   Quantity quantity = Quantity::VELOCITY_MM_S;
   double window = 0.03;
   int target_revs = 30;
   double max_phase_unc_deg = 2.0;
-};
-
-// Starting values for a kind of work. Everything in JobConfig and UiSettings
-// can still be changed on the screen afterwards.
-enum class Preset : uint8_t {
-  MOTOR_ROTOR = 0,  // 1 hp motor rotor on a stand, air driven (PLAN §6.1)
-  TIRE = 1,         // car wheel on a soft (leaf spring) rig, spun by hand, MEMS sensors
 };
 
 class UiModel {
@@ -72,13 +63,9 @@ class UiModel {
   virtual bool start_trim() = 0;
   virtual std::string machine_summary() const = 0;
 
-  // Digital sensors (MPU-6050): readings arrive in g, so there is no
-  // sensitivity or front-end gain to set.
-  virtual bool digital_sensor() const { return false; }
-
-  // Demo mode with the simulated rotor.
+  // Demo mode with the simulated wheel.
   virtual bool simulate() const = 0;
-  virtual void sim_blast() = 0;
+  virtual void sim_spin() = 0;
 };
 
 }  // namespace bal

@@ -15,10 +15,11 @@ namespace bal {
 class RevSim {
  public:
   RevSim();
-  // Swap the motor rotor for a car wheel on a soft rig read by MEMS sensors
+  // Swap the default rotor (used by the DSP host tests) for a car wheel on a
+  // soft rig read by MEMS sensors, as the firmware demo does
   // (same numbers as the host test in tests/test_mpu.cpp).
   void set_tire();
-  // Air blast: jump to rpm and start coasting with time constant tau_s.
+  // A spin: jump to rpm and start coasting with time constant tau_s.
   void blast(double rpm, double tau_s = 10.0);
   // Extra unbalance currently fitted to the rotor (trial or correction), g*mm per plane.
   void set_fitted(cplx p1, cplx p2) {
