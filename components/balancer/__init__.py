@@ -251,6 +251,15 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
+    # The revolution analyser's sample rings (up to a few hundred KB) are
+    # std::vectors. With PSRAM in caps-only mode, new/malloc can only use
+    # internal RAM and the first one throws bad_alloc in setup(). Let large
+    # allocations fall through to PSRAM (small ones stay internal).
+    from esphome.components.esp32 import add_idf_sdkconfig_option
+
+    add_idf_sdkconfig_option("CONFIG_SPIRAM_USE_CAPS_ALLOC", False)
+    add_idf_sdkconfig_option("CONFIG_SPIRAM_USE_MALLOC", True)
+
     if CONF_I2S in config:
         i2s = config[CONF_I2S]
         cg.add(var.set_i2s(i2s[CONF_PORT], i2s[CONF_MCLK_PIN], i2s[CONF_BCLK_PIN], i2s[CONF_LRCLK_PIN],
