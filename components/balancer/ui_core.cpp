@@ -231,9 +231,9 @@ void ModelCore::feed_rev(const RevResult &r, uint32_t now_ms) {
 void ModelCore::tick(uint32_t now_ms) {
   if (simulate_) {
     const double dt = last_tick_ms_ ? std::min<uint32_t>(200, now_ms - last_tick_ms_) / 1000.0 : 0.0;
-    RevResult buf[32];
-    const int n = sim_.step(dt, buf, 32);
-    for (int i = 0; i < n; i++) feed_rev(buf[i], now_ms);
+    if (sim_buf_.empty()) sim_buf_.resize(32);
+    const int n = sim_.step(dt, sim_buf_.data(), static_cast<int>(sim_buf_.size()));
+    for (int i = 0; i < n; i++) feed_rev(sim_buf_[i], now_ms);
     live_.acq_ok = false;
     live_.aligned = true;
     live_.fs = digital_sensor_ ? 250 : 16000;

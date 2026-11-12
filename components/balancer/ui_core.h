@@ -115,6 +115,9 @@ class ModelCore : public UiModel {
 
   bool simulate_ = false;
   RevSim sim_;
+  // Demo revolutions for one tick. A RevResult is about 1.4 KB, so 32 of them
+  // live on the heap: on the stack they overflow ESPHome's 8 KB loop task.
+  std::vector<RevResult> sim_buf_;
   cplx sim_fitted_[2];
   cplx sim_correction_total_[2];
   bool sim_verify_applied_ = false;  // corrections for this result already fitted
