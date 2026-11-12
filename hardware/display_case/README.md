@@ -28,17 +28,18 @@ python render_preview.py
 
 ## What the case has
 
-- Overall 211.80 x 113.72 x 36.2 mm with the default settings (181.80 wide
-  without the tabs): 31.2 mm behind the standoff plane plus a 5.0 mm lip
+- Overall 211.80 x 113.72 x 36.8 mm with the default settings (181.80 wide
+  without the tabs): 31.2 mm behind the standoff plane plus a 5.6 mm lip
   forward of it. Display plus case is about 44 mm deep.
-- Four corner bosses at 166.00 x 99.00 mm, tied into the corner walls. A 2.4 mm
+- Four corner bosses at 166.00 x 99.00 mm, tied into the corner walls. A 2.5 mm
   M2 through hole with a 4.6 mm counterbore from the back, leaving a 4 mm
-  floor. An M2 x 8 screw from the back then has about 4 mm in the standoff. A
+  floor. The counterbore ends in a 45° cone instead of a flat step, so it
+  prints without supports; the screw head seats on the cone. An M2 x 8 screw from the back then has about 4 mm in the standoff. A
   long screwdriver reaches down the counterbore.
 - Front lip, 1.6 mm thick, that carries the wall forward from the standoff
-  tops to the back face of the plastic bezel (5 mm), so the case meets the
-  bezel with no gap. If a print comes out long and the case rocks, set
-  `lip_gap_to_bezel` to 0.3. With `--overhang` of 2 mm or more the lip instead wraps the bezel
+  tops 5.6 mm forward, to the back face of the plastic bezel. The first
+  print (lip 5.0 mm) left a 0.6 mm gap to the screen on the real unit, so
+  `lip_gap_to_bezel` is -0.6. Adjust it if the next print is off. With `--overhang` of 2 mm or more the lip instead wraps the bezel
   and ends flush with the glass front.
 - Mounting tabs on the left and right: 5 mm thick, 15 mm out from the wall,
   91 mm long (80% of the case height), flush with the back face, each with
@@ -115,6 +116,8 @@ spec sheet's back render.
   the project files as `display_full.step.gz`.
 
 A fit check intersects every part of the full model with the case: no contact
-for the flush case or with `--overhang 6.35`. `build_display_dummy()` is still
+for the flush case or with `--overhang 6.35`, except that the lengthened lip
+now overlaps the model's bezel by 0.6 mm (the real bezel is thinner than the
+model's, as measured on the first print). `build_display_dummy()` is still
 in the script as a simple envelope; `render_preview.py` uses the real model
 when the STEP is present.

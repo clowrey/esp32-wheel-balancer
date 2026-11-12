@@ -26,12 +26,14 @@ Run:  python display_case.py            -> writes display_case.step next to this
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 from build123d import (
     Align,
     Box,
+    Cone,
     Cylinder,
     Part,
     Pos,
@@ -101,12 +103,16 @@ class CaseParams:
     # bezel edge and ends flush with the glass front.
     lip: bool = True
     lip_thk: float = 1.6
-    lip_gap_to_bezel: float = 0.0      # flush case: gap left before the bezel's back face (0 = lip touches it)
+    # Gap left before the bezel's back face; negative makes the lip longer.
+    # -0.6: the first print left 0.6 mm between case and screen on the real unit.
+    lip_gap_to_bezel: float = -0.6
     wrap_clearance: float = 0.4        # overhang case: gap round the glass edge
     # Mounting screws, from the back into the display standoffs (M2, confirmed).
-    hole_d: float = 2.4                # M2 clearance
+    hole_d: float = 2.5                # M2 clearance (2.4 was tight on the first print)
     cbore_d: float = 4.6               # M2 socket or pan head (3.8-4.0 mm) + clearance
     screw_floor: float = 4.0           # material under the head: M2x8 -> ~4 mm in the standoff
+    cbore_taper: float = 45.0          # cone from hole to counterbore (deg from the axis), so the
+                                       # counterbore's end needs no support; 0 = flat step
     boss_d: float = 9.0
     # USB-C access window in the back wall, over the two ports.
     usb_window: bool = True
@@ -194,7 +200,16 @@ def build_case(p: CaseParams = CaseParams(), b: Board = Board()) -> Part:
                 p.hole_d / 2, total_z + 2, align=(Align.CENTER, Align.CENTER, Align.MIN)
             )
             # Counterbore from the back so a short screw reaches the standoff.
-            case -= Pos(cx, cy, p.screw_floor) * Cylinder(
+            # Printed back-down, its end is a ceiling, so it ends in a cone
+            # instead of a flat step; the screw head seats on the cone.
+            taper_h = 0.0
+            if p.cbore_taper > 0:
+                taper_h = (p.cbore_d - p.hole_d) / 2 / math.tan(math.radians(p.cbore_taper))
+                case -= Pos(cx, cy, p.screw_floor) * Cone(
+                    p.hole_d / 2, p.cbore_d / 2, taper_h + 0.01,
+                    align=(Align.CENTER, Align.CENTER, Align.MIN),
+                )
+            case -= Pos(cx, cy, p.screw_floor + taper_h) * Cylinder(
                 p.cbore_d / 2, total_z, align=(Align.CENTER, Align.CENTER, Align.MIN)
             )
 
