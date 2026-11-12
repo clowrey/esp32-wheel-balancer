@@ -11,6 +11,7 @@ free depth behind the raised back cover for the sensor and tach wiring.
 |---|---|
 | `display_case.py` | The model. All dimensions are dataclass fields at the top. |
 | `display_case.step` | Default build: flush outline, 1 in. clearance, front lip, side tabs. |
+| `display_case_assembly.step` | The case and the display together, as they fit (two named parts). |
 | `jc1060p470c_display.step` | 3D model of the display converted from the vendor DWG (outside parts only, 14 MB), placed in the case's coordinates. |
 | `render_preview.py` | Writes `preview.png` (numpy z-buffer renderer, no OpenGL). |
 | `JC1060P470C_I_W_Y-structure-drawing.pdf` | Vendor structure drawing the dimensions come from. |
