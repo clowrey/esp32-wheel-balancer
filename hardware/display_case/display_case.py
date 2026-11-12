@@ -60,25 +60,25 @@ class Board:
     standoff_dx: float = 166.00      # printed, hole spacing X
     standoff_dy: float = 99.00       # printed, hole spacing Y
     standoff_od: float = 5.53        # drawn standoff boss (not printed)
-    # Depths measured by Chester on the real unit (2026-11-11): the plastic
-    # bezel is 7 mm from the glass front to its back face, and the standoffs
-    # stand 5 mm proud of that. (The drawing's side view says 8.00 to the
-    # standoff tops, which does not match this unit.)
-    front_to_standoff: float = 12.0  # glass front -> standoff tops
-    bezel_thk: float = 7.0           # glass front -> back face of the bezel
+    # Depths from the vendor's 3D model (converted from the DWG, see
+    # README): bezel back face 8.00 mm behind the glass front, standoffs
+    # 5.00 mm proud of that. Chester measured 7 + 5 on the unit; the lip only
+    # depends on the 5 mm, which both agree on.
+    front_to_standoff: float = 13.0  # glass front -> standoff tops
+    bezel_thk: float = 8.0           # glass front -> back face of the bezel
     bump_w: float = 124.66           # printed (back cover width)
     bump_h: float = 74.67            # printed (back cover height)
     bump_r: float = 5.21             # drawn corner (not printed)
-    bump_dz: float = 8.38            # printed: standoff plane -> back of cover (re-check on the unit)
+    bump_dz: float = 3.37            # 3D model: standoff tops -> back of the cover (16.37 from the glass front)
     bump_cx: float = -0.15           # cover centre offset, drawing (tiny)
     bump_cy: float = 0.0
-    rj45_dz: float = 4.00            # printed: RJ45 sticks out 4 mm past cover
+    rj45_dz: float = 8.31            # 3D model: RJ45 sticks out 8.3 mm past the cover
     # USB-C pair (two vertical receptacles in oval cut-outs of the cover),
     # back-view coordinates of the pair's bounding box.
-    usb_x0: float = 44.4
-    usb_x1: float = 51.2
-    usb_y0: float = -0.1
-    usb_y1: float = 25.0
+    usb_x0: float = 45.5             # 3D model
+    usb_x1: float = 50.2
+    usb_y0: float = 1.6
+    usb_y1: float = 23.3
     # 26-pin JP1 header (2x13), back-view coordinates.
     hdr_x0: float = -58.5
     hdr_x1: float = -52.4
@@ -241,7 +241,7 @@ def build_display_dummy(b: Board = Board()) -> Part:
         RectangleRounded(165.0, 100.3, 2.0), amount=b.front_to_standoff - b.bezel_thk
     )
     bump = Pos(b.bump_cx, b.bump_cy, 0) * extrude(RectangleRounded(b.bump_w, b.bump_h, b.bump_r), amount=b.bump_dz)
-    rj45 = Pos(30.3, 4.5, b.bump_dz) * extrude(RectangleRounded(17.3, 16.3, 0.5), amount=b.rj45_dz)
+    rj45 = Pos(30.25, 4.43, b.bump_dz) * extrude(RectangleRounded(16.71, 16.12, 0.5), amount=b.rj45_dz)
     hdr = Pos((b.hdr_x0 + b.hdr_x1) / 2, (b.hdr_y0 + b.hdr_y1) / 2, b.bump_dz) * extrude(
         RectangleRounded(b.hdr_x1 - b.hdr_x0, b.hdr_y1 - b.hdr_y0, 0.5), amount=8.5
     )

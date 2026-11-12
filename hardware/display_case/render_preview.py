@@ -17,9 +17,41 @@ HERE = Path(__file__).parent
 
 
 def tris(shape, tol=0.05):
-    verts, faces = shape.tessellate(tol, 0.25)
-    v = np.array([[p.X, p.Y, p.Z] for p in verts])
-    return v[np.array(faces)]
+    """Triangles (N x 3 x 3) of a build123d shape; faces that fail to mesh are skipped."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+
+    w = shape.wrapped
+    BRepMesh_IncrementalMesh(w, tol, False, 0.25, True)
+    out = []
+    ex = TopExp_Explorer(w, TopAbs_FACE)
+    while ex.More():
+        f = TopoDS.Face(ex.Current())
+        loc = TopLoc_Location()
+        tri = BRep_Tool.Triangulation_s(f, loc)
+        if tri is not None and tri.NbTriangles():
+            tr = loc.Transformation()
+            pts = np.array([tri.Node(i).Transformed(tr).Coord() for i in range(1, tri.NbNodes() + 1)])
+            idx = np.array([tri.Triangle(i).Get() for i in range(1, tri.NbTriangles() + 1)]) - 1
+            if f.Orientation() == TopAbs_REVERSED:
+                idx = idx[:, ::-1]
+            out.append(pts[idx])
+        ex.Next()
+    return np.concatenate(out) if out else np.zeros((0, 3, 3))
+
+
+def display_model():
+    """The vendor display model (jc1060p470c_display.step, case coordinates) or the simple envelope."""
+    step = HERE / "jc1060p470c_display.step"
+    if step.exists():
+        from build123d import import_step
+
+        return import_step(str(step)), "display model"
+    return dc.build_display_dummy(), "display envelope"
 
 
 def rot(elev, azim):
@@ -83,18 +115,18 @@ def render(parts, elev, azim, size=(800, 560), pad=30):
 
 def main():
     case = dc.build_case()
-    disp = dc.build_display_dummy()
+    disp, disp_name = display_model()
     grey, blue = (0.86, 0.86, 0.88), (0.35, 0.52, 0.85)
     case_t, disp_t = tris(case), tris(disp)
     disp_ex = tris(Pos(0, 0, -40) * disp)
-    cut = Pos(0, -100, -60) * Box(300, 100, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
+    cut = Pos(0, -100 + 12.0, -60) * Box(300, 100, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
     sec = [(tris(case & cut), grey), (tris(disp & cut), blue)]
 
     views = [
         ("Inside (front side): corner bosses, front lip", render([(case_t, grey)], elev=25, azim=200)),
         ("Back: USB-C window, screw counterbores, cable slot", render([(case_t, grey)], elev=25, azim=-25)),
-        ("Exploded: display envelope (blue) and case", render([(case_t, grey), (disp_ex, blue)], elev=22, azim=-35)),
-        ("Section at mid-height: 1 in. clear behind the bump-out", render(sec, elev=12, azim=-80)),
+        (f"Exploded: {disp_name} (blue) and case", render([(case_t, grey), (disp_ex, blue)], elev=22, azim=-35)),
+        ("Section through the USB-C ports: 1 in. clear behind the bump-out", render(sec, elev=12, azim=-80)),
     ]
     W, H = views[0][1].size
     sheet = Image.new("RGB", (2 * W, 2 * (H + 34)), "white")
