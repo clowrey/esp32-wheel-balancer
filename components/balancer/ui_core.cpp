@@ -58,6 +58,7 @@ void ModelCore::load_defaults() {
     st.invert[c] = settings_.invert[c];
     st.axis[c] = settings_.axis[c];
   }
+  st.mass_oz = settings_.mass_oz;  // from the YAML
   st.quantity = Quantity::DISPLACEMENT_UM;
   st.window = 0.10;
   st.target_revs = 20;

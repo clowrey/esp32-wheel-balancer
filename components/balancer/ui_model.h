@@ -42,6 +42,7 @@ struct UiSettings {
   bool invert[kChannels] = {false, false};
   int axis[kChannels] = {2, 2};  // sensor axis measured: 0 X, 1 Y, 2 Z (starts from the YAML)
   Quantity quantity = Quantity::VELOCITY_MM_S;
+  bool mass_oz = false;  // show and enter balance weights in ounces instead of grams
   double window = 0.03;
   int target_revs = 30;
   double max_phase_unc_deg = 2.0;

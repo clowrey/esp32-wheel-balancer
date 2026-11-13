@@ -371,8 +371,28 @@ void BalancerUi::number_row_(std::vector<Row> &rows, lv_obj_t *parent, const cha
       });
 }
 
-void BalancerUi::refresh_rows_(std::vector<Row> &rows) {
-  for (auto &r : rows) lv_label_set_text(r.value, r.get().c_str());
+// Balance weights in the unit chosen on the settings screen. Computation
+// stays in grams; ounces are only for showing and typing.
+static constexpr double kGramsPerOz = 28.349523125;
+
+std::string BalancerUi::mass_(double g) const {
+  if (model_ != nullptr && model_->settings().mass_oz) return fmt("%.2f oz", g / kGramsPerOz);
+  return fmt("%.*f g", g >= 10 ? 1 : 2, g);
+}
+
+// The nearest stack of 1 oz and 1/4 oz stick-on weights, e.g. "1 oz + 2 x 1/4 oz".
+std::string BalancerUi::mass_pieces_(double g) const {
+  if (model_ == nullptr || !model_->settings().mass_oz) return "";
+  const int q = static_cast<int>(std::lround(g / kGramsPerOz * 4));
+  if (q <= 0) return "less than 1/8 oz: none needed";
+  const int ones = q / 4, quarters = q % 4;
+  std::string s;
+  if (ones > 0) s += fmt("%d oz", ones);
+  if (quarters > 0) s += fmt("%s%d x 1/4 oz", s.empty() ? "" : " + ", quarters);
+  return s + fmt(" (%.2f oz)", q / 4.0);
+}
+
+void BalancerUi::refresh_rows_(std::vector<Row> &rows) {  for (auto &r : rows) lv_label_set_text(r.value, r.get().c_str());
   if (suggest_label_ != nullptr && model_ != nullptr) {
     const auto &cfg = model_->job().config();
     const double g = model_->job().suggested_trial_g(plane_sel_);
@@ -380,8 +400,10 @@ void BalancerUi::refresh_rows_(std::vector<Row> &rows) {
     const std::string why = model_->job().suggested_trial_capped(plane_sel_)
                                 ? fmt("(10x the ISO limit for this plane)")
                                 : fmt("(10%% of rotor weight at %.0f rpm)", rpm);
-    lv_label_set_text(suggest_label_, fmt("Suggested trial for plane %d: %.*f g at %.0f mm\n%s", plane_sel_ + 1,
-                                          g >= 10 ? 0 : 2, g, cfg.plane[plane_sel_].trial_radius_mm, why.c_str())
+    const std::string pieces = mass_pieces_(g);
+    lv_label_set_text(suggest_label_, fmt("Suggested trial for plane %d: %s at %.0f mm%s%s\n%s", plane_sel_ + 1,
+                                          mass_(g).c_str(), cfg.plane[plane_sel_].trial_radius_mm,
+                                          pieces.empty() ? "" : ", about ", pieces.c_str(), why.c_str())
                                           .c_str());
   }
 }
@@ -587,8 +609,15 @@ void BalancerUi::rebuild_plane_rows_() {
   }
   PlaneSetup &ps = cfg.plane[p];
   auto &rows = plane_rows_;
-  number_row_(rows, plane_panel_, "Trial mass", "g", 2, [&ps]() -> double & { return ps.trial_mass_g; }, 0.001, 10000,
-              [this]() { refresh_rows_(plane_rows_); });
+  row_(rows, plane_panel_, "Trial mass", [this, &ps]() { return mass_(ps.trial_mass_g); },
+       [this, &ps]() {
+         const bool oz = model_->settings().mass_oz;
+         ask_number_(oz ? "Trial mass (oz)" : "Trial mass (g)", oz ? ps.trial_mass_g / kGramsPerOz : ps.trial_mass_g, 2,
+                     [this, &ps, oz](double v) {
+                       ps.trial_mass_g = std::min(10000.0, std::max(0.001, oz ? v * kGramsPerOz : v));
+                       refresh_rows_(plane_rows_);
+                     });
+       });
   number_row_(rows, plane_panel_, "Trial angle", "°", 0, [&ps]() -> double & { return ps.trial_angle_deg; }, -360, 720);
   number_row_(rows, plane_panel_, "Trial radius", "mm", 1, [&ps]() -> double & { return ps.trial_radius_mm; }, 1, 5000);
   number_row_(rows, plane_panel_, "Correction radius", "mm", 1, [&ps]() -> double & { return ps.corr_radius_mm; }, 1, 5000);
@@ -810,6 +839,12 @@ void BalancerUi::build_settings_() {
            refresh_rows_(settings_rows_);
          });
   }
+  row_(rows, colm, "Weight units", [&st]() { return std::string(st.mass_oz ? "oz" : "g"); },
+       [this, &st, apply]() {
+         st.mass_oz = !st.mass_oz;
+         apply();
+         refresh_rows_(settings_rows_);
+       });
   row_(rows, colm, "Units", [&st]() { return std::string(quantity_unit(st.quantity)); },
        [this, &st, apply]() {
          st.quantity = static_cast<Quantity>((static_cast<int>(st.quantity) + 1) % 3);
@@ -839,7 +874,7 @@ void BalancerUi::build_settings_() {
                         "shows, or pick X / Y / Z. Gravity shows which\n"
                         "axis is vertical. Changing an axis means starting the\n"
                         "job again. Changes apply now; SAVE keeps them.",
-                        F14, kMuted, 16, 330);
+                        F14, kMuted, 16, 384);
   (void) help;
 
   // Right: which axis each sensor measures, and the network.
@@ -1323,12 +1358,13 @@ void BalancerUi::update_result_() {
       continue;
     }
     const char *verb = pr.mass.remove ? "DRILL" : "ADD";
-    lv_label_set_text(r_big_[p], fmt("%s %.2f g\nat %.0f°", verb, pr.mass.mass_g, pr.mass.angle_deg).c_str());
+    lv_label_set_text(r_big_[p], fmt("%s %s\nat %.0f°", verb, mass_(pr.mass.mass_g).c_str(), pr.mass.angle_deg).c_str());
     lv_obj_set_style_text_color(r_big_[p], col(pr.mass.remove ? kRed : kAmber), 0);
     std::string d = fmt("at %.0f mm radius", ps.corr_radius_mm);
+    if (!pr.mass.remove && !mass_pieces_(pr.mass.mass_g).empty()) d += "\nstick on: " + mass_pieces_(pr.mass.mass_g);
     if (pr.use_split)
-      d += fmt("\nor %.2f g at #%d (%.0f°) + %.2f g at #%d (%.0f°)", pr.split.mass_a, pr.split.pos_a + 1,
-               pr.split.angle_a, pr.split.mass_b, pr.split.pos_b + 1, pr.split.angle_b);
+      d += fmt("\nor %s at #%d (%.0f°) + %s at #%d (%.0f°)", mass_(pr.split.mass_a).c_str(), pr.split.pos_a + 1,
+               pr.split.angle_a, mass_(pr.split.mass_b).c_str(), pr.split.pos_b + 1, pr.split.angle_b);
     if (pr.mass.remove)
       d += fmt("\n%.1f mm drill, %.1f mm deep (to the tip)", cfg.drill_diameter_mm, pr.drill_depth_mm);
     if (verified) d = "Trim (optional): " + d;
@@ -1346,8 +1382,8 @@ void BalancerUi::update_result_() {
   }
   for (int p = 0; p < cfg.planes; p++) {
     const double lim = r.plane[p].iso_limit_gmm;
-    info += fmt("Plane %d ISO G%g limit %.1f g*mm (%.2f g at %.0f mm)\n", p + 1, cfg.grade, lim,
-                lim / cfg.plane[p].corr_radius_mm, cfg.plane[p].corr_radius_mm);
+    info += fmt("Plane %d ISO G%g limit %.1f g*mm (%s at %.0f mm)\n", p + 1, cfg.grade, lim,
+                mass_(lim / cfg.plane[p].corr_radius_mm).c_str(), cfg.plane[p].corr_radius_mm);
   }
   if (verified && r.have_residual) {
     info += "\n";

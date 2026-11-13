@@ -25,7 +25,7 @@ struct SavedState {
   double machine_rpm;
   bal::JobConfig machine_cfg;
 };
-static constexpr uint32_t kStateMagic = 0xBA1A0003;  // 3: UiSettings gained axis[]
+static constexpr uint32_t kStateMagic = 0xBA1A0004;  // 3: UiSettings.axis[]; 4: mass_oz
 
 class BalancerComponent : public Component, public bal::ModelCore {
  public:
@@ -50,6 +50,7 @@ class BalancerComponent : public Component, public bal::ModelCore {
   void set_phase_sensor_a(sensor::Sensor *s) { phase_sensor_[0] = s; }
   void set_phase_sensor_b(sensor::Sensor *s) { phase_sensor_[1] = s; }
   void set_pc_log_at_boot(bool on) { pc_log_at_boot_ = on; }
+  void set_weight_unit_oz(bool oz) { settings_.mass_oz = oz; }
   void set_tach_teach_pin(int pin) { teach_pin_ = pin; }
 
   // --- UiModel ---

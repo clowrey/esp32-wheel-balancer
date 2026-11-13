@@ -102,6 +102,8 @@ class BalancerUi {
   void update_result_();
   void update_live_();
   void update_settings_();
+  std::string mass_(double g) const;         // in g or oz, as set on the settings screen
+  std::string mass_pieces_(double g) const;  // nearest 1 oz + 1/4 oz stack (oz mode only)
   void build_detect_(lv_obj_t *scr);
   void open_detect_();
   void detect_next_();
