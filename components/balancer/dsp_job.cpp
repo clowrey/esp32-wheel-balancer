@@ -97,13 +97,14 @@ std::string BalanceJob::instruction() const {
   const double lo = test_rpm_ * (1.0 - cfg_.window), hi = test_rpm_ * (1.0 + cfg_.window);
   std::string coast;
   if (test_rpm_ > 0)
-    coast = fmt("Spin it above %.0f rpm and let it coast through %.0f-%.0f rpm.", hi * 1.05, lo, hi);
+    coast = fmt("Hold it at %.0f-%.0f rpm, or spin it above %.0f rpm and let it coast through.", lo, hi, hi * 1.05);
   else
-    coast = "Spin it up and tap LOCK SPEED at the test speed you want, then let it coast.";
+    coast = "Spin it up and hold a steady speed: it locks by itself (or tap LOCK SPEED).";
 
   auto trial_txt = [&](int p) {
     const PlaneSetup &ps = cfg_.plane[p];
-    return fmt("Fit %.2f g at %.0f° on plane %d (radius %.0f mm).", ps.trial_mass_g,
+    return fmt("Fit %.2f %s at %.0f° on plane %d (radius %.0f mm).", mass_oz_ ? ps.trial_mass_g / 28.349523125 : ps.trial_mass_g,
+               mass_oz_ ? "oz" : "g",
                wrap360(ps.trial_angle_deg), p + 1, ps.trial_radius_mm);
   };
 

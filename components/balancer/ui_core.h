@@ -36,6 +36,12 @@ class ModelCore : public UiModel {
   // though its phase is not (a balanced rotor has no phase), as a
   // displacement in um. 0 keeps the per-unit defaults.
   void set_amp_floor_um(double um) { amp_floor_um_ = um; }
+  // Lock the test speed by itself once the rotor holds a steady speed inside
+  // [lo, hi] rpm, for when both hands are busy spinning it. hi <= 0: off.
+  void set_auto_lock(double lo, double hi) {
+    auto_lo_ = lo;
+    auto_hi_ = hi;
+  }
   LiveData &live_mut() { return live_; }
   void load_machine(const InfluenceModel &m, double rpm, const JobConfig &cfg) {
     machine_ = m;
@@ -61,6 +67,8 @@ class ModelCore : public UiModel {
   RevStatus last_rev_status() const override { return last_status_; }
   const std::vector<cplx> &run_dots(int ch) override { return dots_[ch]; }
   void lock_speed(double rpm) override;
+  double auto_lock_lo() const override { return auto_hi_ > 0 ? auto_lo_ : 0; }
+  double auto_lock_hi() const override { return auto_hi_; }
   bool has_machine() const override { return has_machine_ && machine_.planes <= job_.max_planes(); }
   void save_machine() override;
   bool start_trim() override;
@@ -87,6 +95,9 @@ class ModelCore : public UiModel {
   std::vector<cplx> dots_[kChannels];
   LiveData live_;
   double last_rpm_ = 0;
+  double auto_lo_ = 0, auto_hi_ = 0;
+  std::deque<double> lock_hist_;  // recent steady revolutions, for the auto lock
+  static constexpr size_t kAutoLockRevs = 6;
   uint32_t last_rev_ms_ = 0;
   uint32_t last_stats_ms_ = 0;
   uint32_t last_tick_ms_ = 0;

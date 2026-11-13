@@ -1292,18 +1292,21 @@ void BalancerUi::update_measure_() {
         sc = kGreen;
         break;
       case RevStatus::ABOVE_WINDOW:
-        state = "Above window: let it coast";
+        state = "Above window: slow down or let it coast";
         sc = kAmber;
         break;
       case RevStatus::BELOW_WINDOW:
-        state = "Below window: spin it up again";
+        state = "Below window: speed up";
         break;
       case RevStatus::SPEED_UNSTABLE:
         state = "Speed changing too fast";
         sc = kAmber;
         break;
       case RevStatus::NOT_LOCKED:
-        state = "Tap LOCK SPEED at the test speed";
+        state = model_->auto_lock_hi() > 0
+                    ? fmt("Hold %.0f-%.0f rpm steady: locks by itself",
+                          model_->auto_lock_lo(), model_->auto_lock_hi())
+                    : std::string("Tap LOCK SPEED at the test speed");
         sc = kChA;
         break;
       case RevStatus::FULL:
@@ -1320,6 +1323,9 @@ void BalancerUi::update_measure_() {
   lv_label_set_text(m_revs_, fmt("Revolutions  %d / %d", st.revs, set.target_revs).c_str());
   lv_bar_set_value(m_revs_bar_, std::min(100, st.revs * 100 / std::max(1, set.target_revs)), LV_ANIM_OFF);
   const bool run0 = job.step() == JobStep::RUN0;
+  if (T > 0 && m_prev_test_rpm_ <= 0 && model_->measuring() && model_->auto_lock_hi() > 0)
+    toast_(fmt("Speed locked at %.0f rpm. Keep it within +/-%.0f%% for every run.", T, set.window * 100));
+  m_prev_test_rpm_ = T;
   set_visible(m_lock_, run0 && T <= 0);
   set_visible(m_setspeed_, run0);
   set_visible(m_spin_, model_->simulate());

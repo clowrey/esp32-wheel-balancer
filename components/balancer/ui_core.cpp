@@ -12,6 +12,7 @@ ModelCore::ModelCore() {
 }
 
 void ModelCore::configure_measurement_() {
+  job_.set_mass_oz(settings_.mass_oz);
   MeasureConfig mc = meas_.config();
   mc.window = settings_.window;
   mc.target_revs = settings_.target_revs;
@@ -64,6 +65,10 @@ void ModelCore::load_defaults() {
   st.target_revs = 20;
   st.max_phase_unc_deg = 3.0;
   max_period_change_ = 0.03;
+  // Spun by a drill or by hand: lock by itself anywhere from a slow 150 rpm
+  // to 450 rpm, whatever speed the person can hold steady.
+  auto_lo_ = 150;
+  auto_hi_ = 450;
   // MEMS noise: a reading known to 2.5 um is as good as it gets in one or
   // two spins, and is a few percent of what the tolerance looks like.
   amp_floor_um_ = 2.5;
@@ -87,6 +92,7 @@ void ModelCore::apply_settings(bool persist) {
 
 void ModelCore::start_run() {
   configure_measurement_();
+  lock_hist_.clear();
   stats_ = meas_.stats();
   for (auto &d : dots_) d.clear();
   last_status_ = job_.test_rpm() > 0 ? RevStatus::BELOW_WINDOW : RevStatus::NOT_LOCKED;
@@ -201,6 +207,26 @@ void ModelCore::feed_rev(const RevResult &r, uint32_t now_ms) {
   }
   live_revs_.push_back(lr);
   while (live_revs_.size() > kLiveRevs) live_revs_.pop_front();
+
+  // Auto lock: the first run has no test speed yet. Once the last few
+  // revolutions are continuous, within +/-3 % of each other and inside the
+  // auto range, lock to their mean, as if LOCK SPEED had been tapped.
+  if (measuring_ && job_.test_rpm() <= 0 && auto_hi_ > 0) {
+    if (r.period_change == 0.0) lock_hist_.clear();  // a gap: start over
+    lock_hist_.push_back(r.rpm);
+    while (lock_hist_.size() > kAutoLockRevs) lock_hist_.pop_front();
+    if (lock_hist_.size() == kAutoLockRevs) {
+      double mean = 0;
+      for (double v : lock_hist_) mean += v;
+      mean /= lock_hist_.size();
+      bool steady = mean >= auto_lo_ && mean <= auto_hi_;
+      for (double v : lock_hist_) steady = steady && std::fabs(v - mean) <= 0.03 * mean;
+      if (steady) {
+        lock_speed(mean);
+        lock_hist_.clear();
+      }
+    }
+  }
 
   if (measuring_) {
     last_status_ = meas_.add(r);

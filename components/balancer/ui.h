@@ -134,6 +134,7 @@ class BalancerUi {
   lv_obj_t *m_window_ = nullptr, *m_state_ = nullptr, *m_revs_ = nullptr, *m_revs_bar_ = nullptr;
   lv_obj_t *m_lock_ = nullptr, *m_setspeed_ = nullptr, *m_spin_ = nullptr, *m_accept_ = nullptr;
   lv_obj_t *m_read_[2] = {};
+  double m_prev_test_rpm_ = 0;  // to notice the speed locking by itself
   PolarView polar_[2];
   // result
   lv_obj_t *r_instr_ = nullptr, *r_big_[2] = {}, *r_detail_[2] = {}, *r_title_[2] = {}, *r_info_ = nullptr;

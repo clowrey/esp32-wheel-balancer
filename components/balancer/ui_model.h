@@ -69,6 +69,9 @@ class UiModel {
   virtual const std::vector<cplx> &run_dots(int channel) = 0;  // recent accepted revolutions
   // Lock the test speed (job + current run). rpm <= 0 means "current speed".
   virtual void lock_speed(double rpm) = 0;
+  // The speed locks by itself when steady inside this range (0, 0: manual only).
+  virtual double auto_lock_lo() const { return 0; }
+  virtual double auto_lock_hi() const { return 0; }
 
   // Saved machine (influence model) for single-run trim balancing.
   virtual bool has_machine() const = 0;
