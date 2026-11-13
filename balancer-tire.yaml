@@ -14,6 +14,7 @@ packages:
 balancer:
   id: rotor_balancer
   simulate: ${simulate}
+  weight_unit: oz        # balance weights in ounces (1 oz and 1/4 oz stick-ons); g for grams
   mpu6050:
     sda_pin: GPIO1        # JP1 pin 7: sensor A's bus
     scl_pin: GPIO2        # JP1 pin 9

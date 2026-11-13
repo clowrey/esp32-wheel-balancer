@@ -101,6 +101,14 @@ class BalancerUi {
   void update_measure_();
   void update_result_();
   void update_live_();
+  void update_settings_();
+  std::string mass_(double g) const;         // in g or oz, as set on the settings screen
+  std::string mass_pieces_(double g) const;  // nearest 1 oz + 1/4 oz stack (oz mode only)
+  void build_detect_(lv_obj_t *scr);
+  void open_detect_();
+  void detect_next_();
+  void finish_detect_();
+  void update_detect_();
   void rebuild_plane_rows_();
 
   void on_start_();
@@ -138,6 +146,21 @@ class BalancerUi {
   lv_obj_t *l_bars_[2][kMaxOrder] = {};
   // Bottom-right panel shows either the orders or the raw readings.
   lv_obj_t *s_teach_btn_ = nullptr;  // settings: hold to teach the tach sensor
+  // settings: axis picker per sensor, and network status
+  lv_obj_t *s_axis_btn_[2][3] = {};
+  lv_obj_t *s_axis_info_[2] = {}, *s_axis_grav_[2] = {};
+  lv_obj_t *s_net_ = nullptr;
+  // guided axis finder (overlay on the settings screen)
+  lv_obj_t *det_overlay_ = nullptr, *det_title_ = nullptr, *det_text_ = nullptr, *det_prog_ = nullptr;
+  lv_obj_t *det_bar_[3] = {}, *det_val_[3] = {}, *det_btn_l_ = nullptr, *det_btn_r_ = nullptr;
+  lv_obj_t *det_line_a_[3] = {}, *det_line_b_[3] = {};
+  lv_point_precise_t det_axle_pts_[2], det_arrow_a_[2], det_head_a_[3], det_head_a2_[3];
+  lv_point_precise_t det_arrow_b_[2], det_head_b_[3], det_head_b2_[3];
+  int det_ch_ = -1;  // sensor being found, -1 closed
+  bool det_running_ = false, det_done_ = false;
+  uint32_t det_end_ms_ = 0;
+  float det_peak_[3] = {0, 0, 0};
+  std::string det_result_;
   lv_obj_t *l_orders_box_ = nullptr, *l_raw_box_ = nullptr, *l_view_btn_ = nullptr, *l_pclog_btn_ = nullptr;
   lv_obj_t *l_raw_[2] = {}, *l_raw_info_ = nullptr;
   lv_point_precise_t l_raw_pts_[2][LiveData::kRawPts];

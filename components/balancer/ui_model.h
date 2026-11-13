@@ -25,6 +25,10 @@ struct LiveData {
   bool acq_ok = false;         // acquisition running
   bool aligned = false;        // timebase locked
   unsigned resyncs = 0, overflows = 0, glitches = 0, tach_pulses = 0;
+  // Every axis of each sensor over the last second (g): mean, mostly gravity,
+  // and AC rms, the shaking. For the axis picker on the settings screen.
+  float axis_mean[kChannels][3] = {};
+  float axis_rms[kChannels][3] = {};
   unsigned read_errors[kChannels] = {0, 0};  // failed I2C reads, per sensor
   unsigned missed[kChannels] = {0, 0};       // readings skipped because the task fell behind
   // The latest raw readings of each sensor's measured axis (g, oldest first),
@@ -36,7 +40,9 @@ struct LiveData {
 
 struct UiSettings {
   bool invert[kChannels] = {false, false};
+  int axis[kChannels] = {2, 2};  // sensor axis measured: 0 X, 1 Y, 2 Z (starts from the YAML)
   Quantity quantity = Quantity::VELOCITY_MM_S;
+  bool mass_oz = false;  // show and enter balance weights in ounces instead of grams
   double window = 0.03;
   int target_revs = 30;
   double max_phase_unc_deg = 2.0;
@@ -69,6 +75,9 @@ class UiModel {
   virtual void save_machine() = 0;
   virtual bool start_trim() = 0;
   virtual std::string machine_summary() const = 0;
+
+  // One line per item: Wi-Fi, IP address, Home Assistant. Empty off-device.
+  virtual std::string network_status() const { return ""; }
 
   // Raw stream of every reading to the USB log, for a PC (tools/mpu_log.py).
   virtual bool pc_log() const { return false; }

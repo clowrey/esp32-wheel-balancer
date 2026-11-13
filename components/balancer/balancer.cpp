@@ -5,6 +5,12 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
+#ifdef USE_API
+#include "esphome/components/api/api_server.h"
+#endif
 
 #ifdef USE_ESP32
 #include "driver/gpio.h"
@@ -36,6 +42,7 @@ void BalancerComponent::set_mpu_sensor(int ch, int address, int int_pin, int axi
   mpu_cfg_.address[ch] = static_cast<uint8_t>(address);
   mpu_cfg_.pin_int[ch] = int_pin;
   mpu_cfg_.axis[ch] = axis;
+  settings_.axis[ch] = axis;
   settings_.invert[ch] = invert;
   if (mpu_cfg_.sensors < ch + 1) mpu_cfg_.sensors = ch + 1;
 }
@@ -79,7 +86,10 @@ void BalancerComponent::setup() {
     if (saved_.has_machine) load_machine(saved_.machine, saved_.machine_rpm, saved_.machine_cfg);
     ESP_LOGI(TAG, "restored settings%s", saved_.has_machine ? " and saved machine" : "");
   }
-  for (int c = 0; c < 2; c++) mpu_cfg_.invert[c] = settings_.invert[c];
+  for (int c = 0; c < 2; c++) {
+    mpu_cfg_.invert[c] = settings_.invert[c];
+    if (settings_.axis[c] >= 0 && settings_.axis[c] <= 2) mpu_cfg_.axis[c] = settings_.axis[c];
+  }
   configure_measurement_();
 
 #ifdef USE_ESP32
@@ -98,8 +108,12 @@ void BalancerComponent::setup() {
 
 void BalancerComponent::on_settings_changed() {
 #ifdef USE_ESP32
-  for (int c = 0; c < 2; c++)
-    if (mpu_) mpu_->set_invert(c, settings_.invert[c]);
+  for (int c = 0; c < 2; c++) {
+    if (!mpu_) continue;
+    mpu_->set_invert(c, settings_.invert[c]);
+    mpu_->set_axis(c, settings_.axis[c]);
+    mpu_cfg_.axis[c] = settings_.axis[c];  // for the config dump
+  }
 #endif
 }
 
@@ -139,10 +153,43 @@ void BalancerComponent::update_acq_status_() {
     live_.rms_g[c] = st.rms_g[c].load();
     live_.peak_frac[c] = st.peak_frac[c].load();
     live_.read_errors[c] = st.read_errors[c].load();
+    for (int k = 0; k < 3; k++) {
+      live_.axis_mean[c][k] = st.axis_mean[c][k].load();
+      live_.axis_rms[c][k] = st.axis_rms[c][k].load();
+    }
     live_.missed[c] = st.missed[c].load();
     live_.raw_n[c] = mpu_->copy_raw(c, live_.raw[c], bal::LiveData::kRawPts);
   }
 #endif
+}
+
+std::string BalancerComponent::network_status() const {
+  std::string out;
+#ifdef USE_WIFI
+  auto *w = wifi::global_wifi_component;
+  if (w != nullptr && w->is_connected()) {
+    char ssid[wifi::SSID_BUFFER_SIZE];
+    w->wifi_ssid_to(ssid);
+    out += str_sprintf("Wi-Fi: connected to %s, %d dBm\n", ssid, (int) w->wifi_rssi());
+    std::string ips;
+    for (auto &ip : w->get_ip_addresses()) {
+      if (!ip.is_set() || !ip.is_ip4()) continue;
+      char buf[network::IP_ADDRESS_BUFFER_SIZE];
+      if (!ips.empty()) ips += ", ";
+      ips += ip.str_to(buf);
+    }
+    out += "IP: " + (ips.empty() ? std::string("none yet") : ips) + "\n";
+  } else {
+    out += "Wi-Fi: NOT connected\nIP: none\n";
+  }
+#else
+  out += "Wi-Fi: not in this firmware\n";
+#endif
+#ifdef USE_API
+  const bool ha = api::global_api_server != nullptr && api::global_api_server->is_connected();
+  out += ha ? "Home Assistant: connected" : "Home Assistant: not connected";
+#endif
+  return out;
 }
 
 bool BalancerComponent::pc_log() const {

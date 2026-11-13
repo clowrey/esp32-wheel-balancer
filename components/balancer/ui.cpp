@@ -371,8 +371,28 @@ void BalancerUi::number_row_(std::vector<Row> &rows, lv_obj_t *parent, const cha
       });
 }
 
-void BalancerUi::refresh_rows_(std::vector<Row> &rows) {
-  for (auto &r : rows) lv_label_set_text(r.value, r.get().c_str());
+// Balance weights in the unit chosen on the settings screen. Computation
+// stays in grams; ounces are only for showing and typing.
+static constexpr double kGramsPerOz = 28.349523125;
+
+std::string BalancerUi::mass_(double g) const {
+  if (model_ != nullptr && model_->settings().mass_oz) return fmt("%.2f oz", g / kGramsPerOz);
+  return fmt("%.*f g", g >= 10 ? 1 : 2, g);
+}
+
+// The nearest stack of 1 oz and 1/4 oz stick-on weights, e.g. "1 oz + 2 x 1/4 oz".
+std::string BalancerUi::mass_pieces_(double g) const {
+  if (model_ == nullptr || !model_->settings().mass_oz) return "";
+  const int q = static_cast<int>(std::lround(g / kGramsPerOz * 4));
+  if (q <= 0) return "less than 1/8 oz: none needed";
+  const int ones = q / 4, quarters = q % 4;
+  std::string s;
+  if (ones > 0) s += fmt("%d oz", ones);
+  if (quarters > 0) s += fmt("%s%d x 1/4 oz", s.empty() ? "" : " + ", quarters);
+  return s + fmt(" (%.2f oz)", q / 4.0);
+}
+
+void BalancerUi::refresh_rows_(std::vector<Row> &rows) {  for (auto &r : rows) lv_label_set_text(r.value, r.get().c_str());
   if (suggest_label_ != nullptr && model_ != nullptr) {
     const auto &cfg = model_->job().config();
     const double g = model_->job().suggested_trial_g(plane_sel_);
@@ -380,8 +400,10 @@ void BalancerUi::refresh_rows_(std::vector<Row> &rows) {
     const std::string why = model_->job().suggested_trial_capped(plane_sel_)
                                 ? fmt("(10x the ISO limit for this plane)")
                                 : fmt("(10%% of rotor weight at %.0f rpm)", rpm);
-    lv_label_set_text(suggest_label_, fmt("Suggested trial for plane %d: %.*f g at %.0f mm\n%s", plane_sel_ + 1,
-                                          g >= 10 ? 0 : 2, g, cfg.plane[plane_sel_].trial_radius_mm, why.c_str())
+    const std::string pieces = mass_pieces_(g);
+    lv_label_set_text(suggest_label_, fmt("Suggested trial for plane %d: %s at %.0f mm%s%s\n%s", plane_sel_ + 1,
+                                          mass_(g).c_str(), cfg.plane[plane_sel_].trial_radius_mm,
+                                          pieces.empty() ? "" : ", about ", pieces.c_str(), why.c_str())
                                           .c_str());
   }
 }
@@ -400,6 +422,9 @@ void BalancerUi::ask_number_(const char *title, double current, int decimals, st
   lv_obj_set_style_text_font(ta, F28, 0);
   lv_textarea_set_text(ta, fmt("%.*f", decimals, current).c_str());
   lv_obj_t *kb = lv_keyboard_create(p);
+  // lv_keyboard_create aligns itself to the parent's bottom; without this the
+  // position below is an offset from there and the pad runs off the screen.
+  lv_obj_set_align(kb, LV_ALIGN_TOP_LEFT);
   lv_obj_set_pos(kb, 24, 150);
   lv_obj_set_size(kb, 552, 370);
   lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
@@ -587,8 +612,15 @@ void BalancerUi::rebuild_plane_rows_() {
   }
   PlaneSetup &ps = cfg.plane[p];
   auto &rows = plane_rows_;
-  number_row_(rows, plane_panel_, "Trial mass", "g", 2, [&ps]() -> double & { return ps.trial_mass_g; }, 0.001, 10000,
-              [this]() { refresh_rows_(plane_rows_); });
+  row_(rows, plane_panel_, "Trial mass", [this, &ps]() { return mass_(ps.trial_mass_g); },
+       [this, &ps]() {
+         const bool oz = model_->settings().mass_oz;
+         ask_number_(oz ? "Trial mass (oz)" : "Trial mass (g)", oz ? ps.trial_mass_g / kGramsPerOz : ps.trial_mass_g, 2,
+                     [this, &ps, oz](double v) {
+                       ps.trial_mass_g = std::min(10000.0, std::max(0.001, oz ? v * kGramsPerOz : v));
+                       refresh_rows_(plane_rows_);
+                     });
+       });
   number_row_(rows, plane_panel_, "Trial angle", "°", 0, [&ps]() -> double & { return ps.trial_angle_deg; }, -360, 720);
   number_row_(rows, plane_panel_, "Trial radius", "mm", 1, [&ps]() -> double & { return ps.trial_radius_mm; }, 1, 5000);
   number_row_(rows, plane_panel_, "Correction radius", "mm", 1, [&ps]() -> double & { return ps.corr_radius_mm; }, 1, 5000);
@@ -810,6 +842,12 @@ void BalancerUi::build_settings_() {
            refresh_rows_(settings_rows_);
          });
   }
+  row_(rows, colm, "Weight units", [&st]() { return std::string(st.mass_oz ? "oz" : "g"); },
+       [this, &st, apply]() {
+         st.mass_oz = !st.mass_oz;
+         apply();
+         refresh_rows_(settings_rows_);
+       });
   row_(rows, colm, "Units", [&st]() { return std::string(quantity_unit(st.quantity)); },
        [this, &st, apply]() {
          st.quantity = static_cast<Quantity>((static_cast<int>(st.quantity) + 1) % 3);
@@ -834,16 +872,49 @@ void BalancerUi::build_settings_() {
        });
   number_row_(rows, colm, "Max phase uncertainty", "°", 1, [&st]() -> double & { return st.max_phase_unc_deg; }, 0.2, 20, apply);
 
+  lv_obj_t *help = text(left,
+                        "Axes: tap FIND AXES and push the tyre the way the arrow\n"
+                        "shows, or pick X / Y / Z. Gravity shows which\n"
+                        "axis is vertical. Changing an axis means starting the\n"
+                        "job again. Changes apply now; SAVE keeps them.",
+                        F14, kMuted, 16, 384);
+  (void) help;
+
+  // Right: which axis each sensor measures, and the network.
   lv_obj_t *right = box(s, 592, 66, 416, 458);
-  lv_obj_t *t = text(right,
-                     "Sensors: digital accelerometers,\nalready calibrated in g.\n\n"
-                     "Polarity: flip a sensor that is\nmounted facing the other way.\n\n"
-                     "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
-                     "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
-                     "TEACH TACH: hold it like the teach\nkey on the LX-101 tach sensor.\n\n"
-                     "Changes apply immediately.\nSAVE keeps them after a reboot.",
-                     F20, kMuted, 16, 14);
-  (void) t;
+  text(right, "SENSOR AXES", F14, kMuted, 12, 8);
+  const uint32_t chc[2] = {kChA, kChB};
+  for (int c = 0; c < 2; c++) {
+    const int y0 = 32 + c * 112;
+    text(right, c == 0 ? "A" : "B", F28, chc[c], 14, y0 + 6);
+    for (int k = 0; k < 3; k++) {
+      lv_obj_t *ab = button_(
+          right, k == 0 ? "X" : (k == 1 ? "Y" : "Z"), F20,
+          [this, c, k]() {
+            UiSettings &st = model_->settings();
+            if (st.axis[c] == k) return;
+            st.axis[c] = k;
+            model_->apply_settings(false);
+            refresh_rows_(settings_rows_);
+            toast_(fmt("Sensor %c now reads %c. Runs measured before this no longer match: start the job "
+                       "again. SAVE keeps it.",
+                       'A' + c, "XYZ"[k]));
+          },
+          col(kPanel2));
+      lv_obj_set_pos(ab, 50 + k * 72, y0);
+      lv_obj_set_size(ab, 64, 44);
+      s_axis_btn_[c][k] = ab;
+    }
+    s_axis_info_[c] = text(right, "", F14, kText, 274, y0 - 2);
+    s_axis_grav_[c] = text(right, "", F14, kMuted, 14, y0 + 52);
+  }
+  lv_obj_t *fb = button_(right, "FIND AXES (guided)", F20, [this]() { open_detect_(); }, col(kAccent));
+  lv_obj_set_pos(fb, 12, 262);
+  lv_obj_set_size(fb, 392, 50);
+  text(right, "NETWORK", F14, kMuted, 12, 336);
+  s_net_ = text(right, "", F14, kText, 12, 356);
+  lv_obj_set_width(s_net_, 392);
+  lv_label_set_long_mode(s_net_, LV_LABEL_LONG_MODE_WRAP);
 
   lv_obj_t *b = button_(s, LV_SYMBOL_HOME "  Home", F20, [this]() { show(HOME); }, col(kPanel2));
   lv_obj_set_pos(b, 16, 536);
@@ -875,6 +946,222 @@ void BalancerUi::build_settings_() {
   }, col(kGreen));
   lv_obj_set_pos(b, 788, 536);
   lv_obj_set_size(b, 220, 52);
+  build_detect_(s);  // last, so it sits on top
+}
+
+// Guided axis finder. The person pushes the wheel the way one sensor should
+// measure; the axis with clearly the most AC motion (gravity removed) wins.
+// Sensor A: forward and back (the way the car drives). Sensor B: in and out
+// along the axle. Seen from above, as drawn on the screen.
+static constexpr uint32_t kDetectMs = 4000;
+
+void BalancerUi::build_detect_(lv_obj_t *scr) {
+  lv_obj_t *o = box(scr, 24, 64, 976, 468, 0x111827);
+  lv_obj_set_style_border_color(o, col(kAccent), 0);
+  lv_obj_set_style_border_width(o, 2, 0);
+  det_overlay_ = o;
+  det_title_ = text(o, "", F28, kText, 20, 12);
+
+  // Top view: tyre on the left, axle to the knuckle on the right.
+  lv_obj_t *pic = box(o, 20, 60, 420, 330, kPanel);
+  lv_obj_t *tyre = box(pic, 60, 45, 70, 240, 0x374151, 18);
+  (void) tyre;
+  text(pic, "tyre", F14, kMuted, 72, 290);
+  for (int i = 0; i < 2; i++) det_axle_pts_[i] = {static_cast<lv_value_precise_t>(i ? 300 : 130), 165};
+  line(pic, det_axle_pts_, 2, kMuted, 8);
+  lv_obj_t *kn = box(pic, 300, 115, 34, 100, 0x4b5563, 6);
+  (void) kn;
+  text(pic, "knuckle", F14, kMuted, 286, 220);
+  text(pic, "axle", F14, kMuted, 196, 140);
+  text(pic, "VIEW FROM ABOVE", F14, kMuted, 10, 8);
+  text(pic, "car front", F14, kMuted, 10, 30);
+  // Arrow A: forward / back (vertical in this view), beside the tyre.
+  det_arrow_a_[0] = {30, 60};
+  det_arrow_a_[1] = {30, 270};
+  det_head_a_[0] = {18, 80};
+  det_head_a_[1] = {30, 60};
+  det_head_a_[2] = {42, 80};
+  det_head_a2_[0] = {18, 250};
+  det_head_a2_[1] = {30, 270};
+  det_head_a2_[2] = {42, 250};
+  det_line_a_[0] = line(pic, det_arrow_a_, 2, kChA, 6);
+  det_line_a_[1] = line(pic, det_head_a_, 3, kChA, 6);
+  det_line_a_[2] = line(pic, det_head_a2_, 3, kChA, 6);
+  // Arrow B: in / out along the axle (horizontal), under the axle.
+  det_arrow_b_[0] = {150, 250};
+  det_arrow_b_[1] = {390, 250};
+  det_head_b_[0] = {170, 238};
+  det_head_b_[1] = {150, 250};
+  det_head_b_[2] = {170, 262};
+  det_head_b2_[0] = {370, 238};
+  det_head_b2_[1] = {390, 250};
+  det_head_b2_[2] = {370, 262};
+  det_line_b_[0] = line(pic, det_arrow_b_, 2, kChB, 6);
+  det_line_b_[1] = line(pic, det_head_b_, 3, kChB, 6);
+  det_line_b_[2] = line(pic, det_head_b2_, 3, kChB, 6);
+
+  det_text_ = text(o, "", F20, kText, 460, 64);
+  lv_obj_set_width(det_text_, 496);
+  lv_label_set_long_mode(det_text_, LV_LABEL_LONG_MODE_WRAP);
+  static const char *kAxN[3] = {"X", "Y", "Z"};
+  for (int k = 0; k < 3; k++) {
+    text(o, kAxN[k], F28, kText, 460, 200 + k * 50);
+    lv_obj_t *b = lv_bar_create(o);
+    lv_obj_set_pos(b, 500, 206 + k * 50);
+    lv_obj_set_size(b, 330, 26);
+    lv_bar_set_range(b, 0, 1000);
+    lv_obj_set_style_bg_color(b, col(kPanel2), 0);
+    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_radius(b, 4, LV_PART_INDICATOR);
+    det_bar_[k] = b;
+    det_val_[k] = text(o, "", F20, kText, 846, 206 + k * 50);
+  }
+  det_prog_ = lv_bar_create(o);
+  lv_obj_set_pos(det_prog_, 460, 360);
+  lv_obj_set_size(det_prog_, 496, 10);
+  lv_bar_set_range(det_prog_, 0, 1000);
+  lv_obj_set_style_bg_color(det_prog_, col(kPanel2), 0);
+  lv_obj_set_style_bg_color(det_prog_, col(kAmber), LV_PART_INDICATOR);
+
+  det_btn_l_ = button_(o, "Close", F20, [this]() {
+    det_running_ = false;
+    det_ch_ = -1;
+    set_visible(det_overlay_, false);
+  }, col(kPanel2));
+  lv_obj_set_pos(det_btn_l_, 20, 402);
+  lv_obj_set_size(det_btn_l_, 200, 52);
+  det_btn_r_ = button_(o, "START", F20, [this]() { detect_next_(); }, col(kGreen));
+  lv_obj_set_pos(det_btn_r_, 756, 402);
+  lv_obj_set_size(det_btn_r_, 200, 52);
+  set_visible(det_overlay_, false);
+}
+
+void BalancerUi::open_detect_() {
+  det_ch_ = 0;
+  det_running_ = false;
+  det_done_ = false;
+  det_result_.clear();
+  for (float &p : det_peak_) p = 0;
+  set_visible(det_overlay_, true);
+  update_detect_();
+}
+
+// The right-hand button: START a sensor, or move on after a result.
+void BalancerUi::detect_next_() {
+  if (det_running_) return;
+  if (det_done_) {
+    const bool two = model_->live().raw_n[1] > 0 || model_->simulate();
+    if (det_ch_ == 0 && two) {
+      det_ch_ = 1;
+      det_done_ = false;
+      det_result_.clear();
+      for (float &p : det_peak_) p = 0;
+    } else {
+      det_ch_ = -1;
+      set_visible(det_overlay_, false);
+      return;
+    }
+  } else {
+    det_running_ = true;
+    det_end_ms_ = lv_tick_get() + kDetectMs;
+    for (float &p : det_peak_) p = 0;
+  }
+  update_detect_();
+}
+
+void BalancerUi::finish_detect_() {
+  const int c = det_ch_;
+  static const char kAx[] = "XYZ";
+  det_running_ = false;
+  det_done_ = true;
+  int best = 0;
+  for (int k = 1; k < 3; k++)
+    if (det_peak_[k] > det_peak_[best]) best = k;
+  float second = 0;
+  for (int k = 0; k < 3; k++)
+    if (k != best) second = std::max(second, det_peak_[k]);
+  if (det_peak_[best] < 0.005f) {
+    det_result_ = fmt("Sensor %c hardly moved (%.1f mg). Push harder and try again.", 'A' + c, det_peak_[best] * 1000);
+    det_done_ = false;  // same sensor again
+  } else if (det_peak_[best] < 1.5f * second) {
+    det_result_ = fmt("No clear axis for sensor %c: %c and %c moved about the same. The board is probably at an "
+                      "angle to the push. Try again pushing straight, or pick by hand.",
+                      'A' + c, kAx[best], kAx[det_peak_[0] == second ? 0 : (det_peak_[1] == second ? 1 : 2)]);
+    det_done_ = false;
+  } else {
+    UiSettings &st = model_->settings();
+    const bool changed = st.axis[c] != best;
+    st.axis[c] = best;
+    model_->apply_settings(false);
+    det_result_ = fmt("Sensor %c: %c axis (%.0f mg, next best %.0f mg).%s", 'A' + c, kAx[best],
+                      det_peak_[best] * 1000, second * 1000,
+                      changed ? " Changed: start the balancing job again. SAVE keeps it." : " Already set.");
+  }
+}
+
+void BalancerUi::update_detect_() {
+  if (det_overlay_ == nullptr || det_ch_ < 0) return;
+  const int c = det_ch_;
+  const LiveData &lv = model_->live();
+  const uint32_t ca = c == 0 ? kChA : kChB;
+  lv_label_set_text(det_title_, fmt("Find the axis of sensor %c", 'A' + c).c_str());
+  for (int i = 0; i < 3; i++) {
+    lv_obj_set_style_line_color(det_line_a_[i], col(c == 0 ? kChA : 0x4b5563), 0);
+    lv_obj_set_style_line_color(det_line_b_[i], col(c == 1 ? kChB : 0x4b5563), 0);
+  }
+  if (det_running_) {
+    for (int k = 0; k < 3; k++) det_peak_[k] = std::max(det_peak_[k], lv.axis_rms[c][k]);
+    const int32_t left = static_cast<int32_t>(det_end_ms_ - lv_tick_get());
+    lv_bar_set_value(det_prog_, std::max<int32_t>(0, 1000 - left * 1000 / static_cast<int32_t>(kDetectMs)), LV_ANIM_OFF);
+    if (left <= 0) finish_detect_();
+  } else {
+    lv_bar_set_value(det_prog_, det_done_ ? 1000 : 0, LV_ANIM_OFF);
+  }
+  std::string msg;
+  if (det_running_) {
+    msg = c == 0 ? "Keep pushing the tyre FORWARD and BACK (the way the car drives), about once a second..."
+                 : "Keep pushing the tyre IN and OUT along the axle, about once a second...";
+  } else if (!det_result_.empty() && (det_done_ || det_peak_[0] + det_peak_[1] + det_peak_[2] > 0)) {
+    msg = det_result_;
+  } else {
+    msg = c == 0 ? "Sensor A measures FORWARD / BACK, the way the car drives (blue arrow).\n\nTap START, then push "
+                   "the tyre forward and back by hand, about once a second, for 4 seconds."
+                 : "Sensor B measures IN / OUT along the axle (orange arrow).\n\nTap START, then push the tyre "
+                   "in and out along the axle, about once a second, for 4 seconds.";
+  }
+  lv_label_set_text(det_text_, msg.c_str());
+  // Live bars: this sensor's shake on each axis now, scaled to the largest.
+  const float *r = lv.axis_rms[c];
+  const float mx = std::max(0.002f, std::max(r[0], std::max(r[1], r[2])));
+  const int cur = model_->settings().axis[c];
+  for (int k = 0; k < 3; k++) {
+    lv_bar_set_value(det_bar_[k], static_cast<int32_t>(r[k] / mx * 1000), LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(det_bar_[k], col(k == cur ? ca : kMuted), LV_PART_INDICATOR);
+    lv_label_set_text(det_val_[k], fmt("%.0f mg", r[k] * 1000).c_str());
+  }
+  const char *rl = det_running_ ? "..." : (det_done_ ? ((c == 0 && (lv.raw_n[1] > 0 || model_->simulate())) ? "Sensor B" : "Done") : "START");
+  lv_label_set_text(lv_obj_get_child(det_btn_r_, 0), rl);
+}
+
+void BalancerUi::update_settings_() {
+  const LiveData &lv = model_->live();
+  const UiSettings &st = model_->settings();
+  static const char kAx[] = "XYZ";
+  for (int c = 0; c < 2; c++) {
+    for (int k = 0; k < 3; k++)
+      lv_obj_set_style_bg_color(s_axis_btn_[c][k], col(st.axis[c] == k ? (c == 0 ? kChA : kChB) : kPanel2), 0);
+    const float *m = lv.axis_mean[c], *r = lv.axis_rms[c];
+    lv_label_set_text(s_axis_info_[c], fmt("measuring %c", kAx[st.axis[c]]).c_str());
+    lv_label_set_text(s_axis_grav_[c], fmt("gravity  X %+.2f  Y %+.2f  Z %+.2f g\n"
+                                           "shake    X %.1f  Y %.1f  Z %.1f mg rms",
+                                           m[0], m[1], m[2], r[0] * 1000, r[1] * 1000, r[2] * 1000)
+                                           .c_str());
+  }
+  update_detect_();
+  if (s_net_ != nullptr) {
+    const std::string net = model_->network_status();
+    lv_label_set_text(s_net_, net.empty() ? "not available here" : net.c_str());
+  }
 }
 
 // ============================================================================
@@ -926,6 +1213,9 @@ void BalancerUi::update() {
       break;
     case LIVE:
       update_live_();
+      break;
+    case SETTINGS:
+      update_settings_();
       break;
     default:
       break;
@@ -1071,12 +1361,13 @@ void BalancerUi::update_result_() {
       continue;
     }
     const char *verb = pr.mass.remove ? "DRILL" : "ADD";
-    lv_label_set_text(r_big_[p], fmt("%s %.2f g\nat %.0f°", verb, pr.mass.mass_g, pr.mass.angle_deg).c_str());
+    lv_label_set_text(r_big_[p], fmt("%s %s\nat %.0f°", verb, mass_(pr.mass.mass_g).c_str(), pr.mass.angle_deg).c_str());
     lv_obj_set_style_text_color(r_big_[p], col(pr.mass.remove ? kRed : kAmber), 0);
     std::string d = fmt("at %.0f mm radius", ps.corr_radius_mm);
+    if (!pr.mass.remove && !mass_pieces_(pr.mass.mass_g).empty()) d += "\nstick on: " + mass_pieces_(pr.mass.mass_g);
     if (pr.use_split)
-      d += fmt("\nor %.2f g at #%d (%.0f°) + %.2f g at #%d (%.0f°)", pr.split.mass_a, pr.split.pos_a + 1,
-               pr.split.angle_a, pr.split.mass_b, pr.split.pos_b + 1, pr.split.angle_b);
+      d += fmt("\nor %s at #%d (%.0f°) + %s at #%d (%.0f°)", mass_(pr.split.mass_a).c_str(), pr.split.pos_a + 1,
+               pr.split.angle_a, mass_(pr.split.mass_b).c_str(), pr.split.pos_b + 1, pr.split.angle_b);
     if (pr.mass.remove)
       d += fmt("\n%.1f mm drill, %.1f mm deep (to the tip)", cfg.drill_diameter_mm, pr.drill_depth_mm);
     if (verified) d = "Trim (optional): " + d;
@@ -1094,8 +1385,8 @@ void BalancerUi::update_result_() {
   }
   for (int p = 0; p < cfg.planes; p++) {
     const double lim = r.plane[p].iso_limit_gmm;
-    info += fmt("Plane %d ISO G%g limit %.1f g*mm (%.2f g at %.0f mm)\n", p + 1, cfg.grade, lim,
-                lim / cfg.plane[p].corr_radius_mm, cfg.plane[p].corr_radius_mm);
+    info += fmt("Plane %d ISO G%g limit %.1f g*mm (%s at %.0f mm)\n", p + 1, cfg.grade, lim,
+                mass_(lim / cfg.plane[p].corr_radius_mm).c_str(), cfg.plane[p].corr_radius_mm);
   }
   if (verified && r.have_residual) {
     info += "\n";
