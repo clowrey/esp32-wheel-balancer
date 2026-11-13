@@ -15,7 +15,10 @@
 namespace esphome {
 namespace balancer {
 
-// Everything kept in flash. Bump kStateMagic when the layout changes.
+// Everything kept in flash (NVS); it survives reboots and firmware updates.
+// Changing this layout (any struct inside it) makes older saved data fail to
+// load and the person's calibrated settings fall back to defaults, so don't
+// change it casually: add a migration from the previous layout instead.
 struct SavedState {
   uint32_t magic;
   bal::UiSettings settings;

@@ -39,6 +39,10 @@ was removed on 2026-11-12 (it is in git history).
 - No bandpass filters in the measurement path. Synchronous averaging does
   the filtering.
 - Pins and calibration values come from YAML config, never hard-coded.
+- Settings changed on the screen are saved to flash at once and must survive
+  firmware updates. Don't change the layout of `SavedState` (balancer.h) or
+  the structs in it without migrating the previous layout: a size change
+  silently resets the person's calibrated settings.
 - Pin reference: `docs/hardware/pinout.md`. GPIO5 is avoided (LCD reset in
   the CellKeeper YAML).
 - Run the simulator and cross-check tests (`tests/sim`, `tools/`) before

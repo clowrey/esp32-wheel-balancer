@@ -832,7 +832,9 @@ void BalancerUi::build_settings_() {
   lv_obj_set_style_pad_row(colm, 4, 0);
   UiSettings &st = model_->settings();
   auto &rows = settings_rows_;
-  auto apply = [this]() { model_->apply_settings(false); };
+  // Every change is saved to flash straight away, so it survives a reboot or
+  // a firmware update without remembering to tap SAVE.
+  auto apply = [this]() { model_->apply_settings(true); };
   for (int c = 0; c < 2; c++) {
     row_(rows, colm, c == 0 ? "Sensor A polarity" : "Sensor B polarity",
          [&st, c]() { return std::string(st.invert[c] ? "inverted" : "normal"); },
@@ -876,7 +878,7 @@ void BalancerUi::build_settings_() {
                         "Axes: tap FIND AXES and push the tyre the way the arrow\n"
                         "shows, or pick X / Y / Z. Gravity shows which\n"
                         "axis is vertical. Changing an axis means starting the\n"
-                        "job again. Changes apply now; SAVE keeps them.",
+                        "job again. Changes are saved straight away.",
                         F14, kMuted, 16, 384);
   (void) help;
 
@@ -894,10 +896,10 @@ void BalancerUi::build_settings_() {
             UiSettings &st = model_->settings();
             if (st.axis[c] == k) return;
             st.axis[c] = k;
-            model_->apply_settings(false);
+            model_->apply_settings(true);
             refresh_rows_(settings_rows_);
             toast_(fmt("Sensor %c now reads %c. Runs measured before this no longer match: start the job "
-                       "again. SAVE keeps it.",
+                       "again.",
                        'A' + c, "XYZ"[k]));
           },
           col(kPanel2));
@@ -1092,10 +1094,10 @@ void BalancerUi::finish_detect_() {
     UiSettings &st = model_->settings();
     const bool changed = st.axis[c] != best;
     st.axis[c] = best;
-    model_->apply_settings(false);
+    model_->apply_settings(true);
     det_result_ = fmt("Sensor %c: %c axis (%.0f mg, next best %.0f mg).%s", 'A' + c, kAx[best],
                       det_peak_[best] * 1000, second * 1000,
-                      changed ? " Changed: start the balancing job again. SAVE keeps it." : " Already set.");
+                      changed ? " Changed and saved: start the balancing job again." : " Already set.");
   }
 }
 
