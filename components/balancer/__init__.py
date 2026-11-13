@@ -17,7 +17,7 @@ balancer:
 
 import esphome.codegen as cg
 from esphome import pins
-from esphome.components import sensor
+from esphome.components import display, sensor, touchscreen
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_ID,
@@ -25,8 +25,8 @@ from esphome.const import (
     STATE_CLASS_MEASUREMENT,
 )
 
-DEPENDENCIES = ["lvgl"]
-AUTO_LOAD = ["sensor"]
+DEPENDENCIES = ["display", "touchscreen"]
+AUTO_LOAD = ["sensor", "web_server_base"]  # web_server_base: the recording download
 CODEOWNERS = ["@clowrey"]
 
 balancer_ns = cg.esphome_ns.namespace("balancer")
@@ -59,31 +59,13 @@ CONF_AXIS = "axis"
 CONF_MAX_SPEED_CHANGE = "max_speed_change"
 CONF_PC_LOG = "pc_log"
 CONF_WEIGHT_UNIT = "weight_unit"
+CONF_RECORD_MINUTES = "record_minutes"
+# The screen the UI draws on and the touch panel over it (each one picked up by itself when
+# the board has only one).
+CONF_DISPLAY_ID = "display_id"
+CONF_TOUCHSCREEN_ID = "touchscreen_id"
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
-
-# LVGL builds only the widgets and fonts the YAML uses. The UI is written in
-# C++, so register what it needs during validation (before lvgl's codegen).
-UI_WIDGETS = (
-    "label",
-    "button",
-    "line",
-    "bar",
-    "textarea",
-    "keyboard",
-    "buttonmatrix",
-    "flex",
-)
-UI_FONTS = ("montserrat_14", "montserrat_20", "montserrat_28", "montserrat_40", "montserrat_48")
-
-
-def _register_lvgl_needs(config):
-    from esphome.components.lvgl import defines as lvdf
-
-    lvdf.add_lv_use(*UI_WIDGETS)
-    lvdf.get_lv_fonts_used().update(UI_FONTS)
-    return config
-
 
 TACH_SCHEMA = cv.Schema(
     {
@@ -185,6 +167,8 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(BalancerComponent),
+            cv.GenerateID(CONF_DISPLAY_ID): cv.use_id(display.Display),
+            cv.GenerateID(CONF_TOUCHSCREEN_ID): cv.use_id(touchscreen.Touchscreen),
             cv.Optional(CONF_TACH, default={}): TACH_SCHEMA,
             cv.Optional(CONF_SIMULATE, default=False): cv.boolean,
             cv.Optional(CONF_TASK_CORE, default=1): cv.int_range(0, 1),
@@ -196,6 +180,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_PC_LOG, default=False): cv.boolean,
             # Unit for balance weights on the screens until changed and saved in Settings.
             cv.Optional(CONF_WEIGHT_UNIT, default="g"): cv.one_of("g", "oz", lower=True),
+            # Keep the last N minutes of raw readings in PSRAM, downloadable at
+            # http://<board>/recording.bin (tools/mpu_recording.py). 0: off.
+            cv.Optional(CONF_RECORD_MINUTES, default=10): cv.float_range(min=0, max=60),
             cv.Optional(CONF_RPM): sensor.sensor_schema(
                 unit_of_measurement="rpm",
                 icon="mdi:rotate-right",
@@ -210,13 +197,22 @@ CONFIG_SCHEMA = cv.All(
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_on_esp32,
     _check_mpu,
-    _register_lvgl_needs,
 )
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
+    # Allocate the component at setup time instead of in static storage
+    # (what cg.new_Pvariable does). Static data sits in the small block of
+    # internal RAM that is all the heap there is until FreeRTOS starts; the
+    # Wi-Fi co-processor driver and the system tasks fill the rest of it, and
+    # this object is about 27 KB. With it there, 200 more bytes of state made
+    # the board assert in vApplicationGetIdleTaskMemory on every boot.
+    var = cg.Pvariable(
+        config[CONF_ID], cg.RawExpression("new esphome::balancer::BalancerComponent()")
+    )
     await cg.register_component(var, config)
+    cg.add(var.set_display(await cg.get_variable(config[CONF_DISPLAY_ID])))
+    cg.add(var.set_touchscreen(await cg.get_variable(config[CONF_TOUCHSCREEN_ID])))
 
     # The revolution analyser's sample rings (up to a few hundred KB) are
     # std::vectors. With PSRAM in caps-only mode, new/malloc can only use
@@ -235,6 +231,7 @@ async def to_code(config):
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
     cg.add(var.set_pc_log_at_boot(config[CONF_PC_LOG]))
     cg.add(var.set_weight_unit_oz(config[CONF_WEIGHT_UNIT] == "oz"))
+    cg.add(var.set_record_minutes(config[CONF_RECORD_MINUTES]))
     if CONF_MAX_SPEED_CHANGE in config:
         cg.add(var.set_max_speed_change(config[CONF_MAX_SPEED_CHANGE]))
     mpu = config[CONF_MPU6050]

@@ -1,6 +1,8 @@
 #include "balancer.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -11,6 +13,10 @@
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #endif
+#ifdef USE_ESP32
+#include "esphome/components/web_server_base/web_server_base.h"
+#include <esp_http_server.h>
+#endif
 
 #ifdef USE_ESP32
 #include "driver/gpio.h"
@@ -20,6 +26,61 @@ namespace esphome {
 namespace balancer {
 
 static const char *const TAG = "balancer";
+
+#ifdef USE_ESP32
+// GET /recording.bin: the recorder's raw readings, oldest first, for
+// tools/mpu_recording.py. A 64-byte header, then 12-byte records
+// (MpuAcquisition::RecRecord). Sent in chunks straight from PSRAM.
+class RecordingHandler : public AsyncWebHandler {
+ public:
+  explicit RecordingHandler(bal::MpuAcquisition *acq) : acq_(acq) {}
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    if (request->method() != HTTP_GET) return false;
+    char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    const auto url = request->url_to(buf);
+    return url == "/recording.bin";
+  }
+  void handleRequest(AsyncWebServerRequest *request) override {
+    httpd_req_t *req = *request;
+    uint64_t first = 0;
+    const size_t count = acq_->recorder_snapshot(&first);
+    const bal::MpuConfig &cfg = acq_->config();
+    struct __attribute__((packed)) Header {
+      char magic[4];
+      uint32_t header_len, record_size, count, sample_rate, range_g, capture_hz, sensors;
+      uint8_t axis_a, axis_b, filter_hz, reserved0;
+      uint8_t reserved[28];
+    } hd = {};
+    static_assert(sizeof(Header) == 64, "recording header");
+    memcpy(hd.magic, "WBR1", 4);
+    hd.header_len = sizeof(Header);
+    hd.record_size = sizeof(bal::MpuAcquisition::RecRecord);
+    hd.count = static_cast<uint32_t>(count);
+    hd.sample_rate = cfg.sample_rate;
+    hd.range_g = static_cast<uint32_t>(cfg.range_g);
+    hd.capture_hz = acq_->capture_hz();
+    hd.sensors = static_cast<uint32_t>(cfg.sensors);
+    hd.axis_a = static_cast<uint8_t>(cfg.axis[0]);
+    hd.axis_b = static_cast<uint8_t>(cfg.axis[1]);
+    hd.filter_hz = static_cast<uint8_t>(cfg.filter_hz);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"recording.bin\"");
+    if (httpd_resp_send_chunk(req, reinterpret_cast<const char *>(&hd), sizeof(hd)) != ESP_OK) return;
+    static constexpr size_t kChunk = 680;  // records per chunk (~8 KB)
+    std::unique_ptr<bal::MpuAcquisition::RecRecord[]> buf(new bal::MpuAcquisition::RecRecord[kChunk]);
+    for (size_t i = 0; i < count; i += kChunk) {
+      const size_t n = std::min(kChunk, count - i);
+      for (size_t k = 0; k < n; k++) buf[k] = acq_->recorder_at(first + i + k);
+      if (httpd_resp_send_chunk(req, reinterpret_cast<const char *>(buf.get()), n * sizeof(buf[0])) != ESP_OK) return;
+    }
+    httpd_resp_send_chunk(req, nullptr, 0);
+    ESP_LOGI(TAG, "recording sent: %u readings", (unsigned) count);
+  }
+
+ protected:
+  bal::MpuAcquisition *acq_;
+};
+#endif
 
 void BalancerComponent::set_tach(int pin, bool falling, bool pullup) {
   mpu_cfg_.pin_tach = pin;
@@ -52,7 +113,7 @@ void BalancerComponent::set_mpu_sensor(int ch, int address, int int_pin, int axi
 static constexpr uint32_t kTeachMaxMs = 20000;
 
 void BalancerComponent::set_tach_teach(bool on) {
-  if (teach_pin_ < 0 || on == teach_on_) return;
+  if (teach_pin_ < 0 || on == teach_on_ || (on && teach_timed_out_)) return;
 #ifdef USE_ESP32
   gpio_set_level(static_cast<gpio_num_t>(teach_pin_), on ? 1 : 0);
 #endif
@@ -99,11 +160,105 @@ void BalancerComponent::setup() {
     if (!acq_started_) {
       ESP_LOGE(TAG, "acquisition failed to start (check the sensor wiring and tach pin)");
       this->status_set_error(LOG_STR("acquisition failed"));
-    } else if (pc_log_at_boot_) {
-      set_pc_log(true);
+    } else {
+      if (pc_log_at_boot_) set_pc_log(true);
+      if (record_minutes_ > 0 && mpu_->set_recorder_minutes(record_minutes_) &&
+          web_server_base::global_web_server_base != nullptr) {
+        web_server_base::global_web_server_base->init();
+        web_server_base::global_web_server_base->add_handler(new RecordingHandler(mpu_.get()));  // NOLINT
+      }
     }
   }
 #endif
+
+  // The screen: a frame in PSRAM that the UI draws into
+  RAMAllocator<uint16_t> allocator(RAMAllocator<uint16_t>::ALLOC_EXTERNAL);
+  frame_ = allocator.allocate(static_cast<size_t>(bal::SCREEN_W) * bal::SCREEN_H);
+  if (frame_ == nullptr) {
+    ESP_LOGE(TAG, "no memory for the screen's frame");
+  } else {
+    memset(frame_, 0, static_cast<size_t>(bal::SCREEN_W) * bal::SCREEN_H * sizeof(uint16_t));
+    ui_.bind(this);
+    if (touchscreen_ != nullptr) touchscreen_->register_listener(this);
+  }
+  started_ms_ = millis();
+}
+
+// ---- touch ----
+
+void BalancerComponent::touch(touchscreen::TouchPoint tp) {
+  last_touch_ms_ = millis();
+  teach_timed_out_ = false;
+  input_.down = true;
+  input_.x = tp.x;
+  input_.y = tp.y;
+  down_seen_ = false;
+  release_waiting_ = false;
+  touch_event_ = true;
+}
+
+void BalancerComponent::update(const touchscreen::TouchPoints_t &points) {
+  if (points.empty() || !input_.down) return;
+  last_touch_ms_ = millis();
+  // Until a frame has seen the finger down, keep where it came down: that is
+  // where the press starts, and a move from there is a drag, not a tap.
+  if (!down_seen_) return;
+  if (input_.x != points[0].x || input_.y != points[0].y) {
+    input_.x = points[0].x;
+    input_.y = points[0].y;
+    touch_event_ = true;
+  }
+}
+
+void BalancerComponent::release() {
+  last_touch_ms_ = millis();
+  teach_timed_out_ = false;
+  if (!down_seen_) {
+    // No frame has seen the finger down yet: lift it after the next one
+    release_waiting_ = true;
+  } else {
+    input_.down = false;
+  }
+  touch_event_ = true;
+}
+
+// ---- frames ----
+
+// With a finger on the panel a frame is drawn this often; otherwise a few times a second
+static constexpr uint32_t kTouchFrameMs = 30, kQuietFrameMs = 200, kAfterTouchMs = 400;
+
+void BalancerComponent::draw_frame_(uint32_t now) {
+  const uint32_t t0 = micros();
+  update_acq_status_();
+  bal::Canvas canvas(frame_, bal::SCREEN_W, bal::SCREEN_H);
+  // While the panel may still be starting, every frame is drawn and sent whole
+  if (now - started_ms_ < 3000) ui_.redraw();
+  const bool drew = ui_.frame(canvas, input_, now);
+  const uint32_t t1 = micros();
+  if (drew) {
+    for (int i = 0; i < ui_.redrawn_count; i++) send_rows_(ui_.redrawn[i].y0, ui_.redrawn[i].y1);
+    const uint32_t t2 = micros();
+    draw_us_ = t1 - t0;
+    push_us_ = t2 - t1;
+    worst_us_ = std::max(worst_us_, t2 - t0);
+    frames_drawn_++;
+  }
+  if (now - last_report_ms_ >= 60000) {
+    ESP_LOGD(TAG, "screen: %u frames drawn in %u s, %u rows sent; last: draw %u us, send %u us; slowest %u us",
+             (unsigned) frames_drawn_, (unsigned) ((now - last_report_ms_) / 1000), (unsigned) rows_sent_,
+             (unsigned) draw_us_, (unsigned) push_us_, (unsigned) worst_us_);
+    last_report_ms_ = now;
+    frames_drawn_ = rows_sent_ = worst_us_ = 0;
+  }
+}
+
+void BalancerComponent::send_rows_(int y0, int y1) {
+  if (display_ == nullptr) return;
+  // The frame is RGB565 in this chip's byte order, which is what the panel's buffer holds
+  display_->draw_pixels_at(0, y0, bal::SCREEN_W, y1 - y0,
+                           reinterpret_cast<const uint8_t *>(frame_ + static_cast<size_t>(y0) * bal::SCREEN_W),
+                           display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565, false, 0, 0, 0);
+  rows_sent_ += y1 - y0;
 }
 
 void BalancerComponent::on_settings_changed() {
@@ -163,7 +318,18 @@ void BalancerComponent::update_acq_status_() {
 #endif
 }
 
-std::string BalancerComponent::network_status() const {
+std::string BalancerComponent::network_status() const { return net_text_; }
+
+// The SSID and signal come from the Wi-Fi co-processor: a blocking request over
+// SDIO that can stall for seconds when the link is busy (asked 5x a second it
+// froze the loop until the task watchdog reset the board). So the text is made
+// here, at most every 10 s and only while the settings screen shows it, and the
+// UI only ever reads the finished string (the same within a frame).
+void BalancerComponent::refresh_network_(uint32_t now) {
+  if (ui_.current() != bal::BalancerUi::SETTINGS) return;
+  if (net_valid_ && now - net_asked_ms_ < 10000) return;
+  net_valid_ = true;
+  net_asked_ms_ = now;
   std::string out;
 #ifdef USE_WIFI
   auto *w = wifi::global_wifi_component;
@@ -189,7 +355,7 @@ std::string BalancerComponent::network_status() const {
   const bool ha = api::global_api_server != nullptr && api::global_api_server->is_connected();
   out += ha ? "Home Assistant: connected" : "Home Assistant: not connected";
 #endif
-  return out;
+  net_text_ = out;
 }
 
 bool BalancerComponent::pc_log() const {
@@ -217,16 +383,25 @@ void BalancerComponent::loop() {
   if (teach_on_ && now - teach_since_ms_ > kTeachMaxMs) {
     ESP_LOGW(TAG, "tach teach held for %u s: releasing it", (unsigned) (kTeachMaxMs / 1000));
     set_tach_teach(false);
+    teach_timed_out_ = true;
   }
 
-  if (!ui_.built() && lv_display_get_default() != nullptr) {
-    ui_.build(this);
-    ESP_LOGI(TAG, "UI ready");
-  }
-  if (ui_.built() && now - last_ui_ms_ >= 200) {
-    last_ui_ms_ = now;
-    update_acq_status_();
-    ui_.update();
+  if (frame_ != nullptr) {
+    const bool busy = input_.down || now - last_touch_ms_ < kAfterTouchMs;
+    if (touch_event_ || now - last_frame_ms_ >= (busy ? kTouchFrameMs : kQuietFrameMs)) {
+      touch_event_ = false;
+      last_frame_ms_ = now;
+      refresh_network_(now);
+      draw_frame_(now);
+      if (input_.down) down_seen_ = true;
+      if (release_waiting_) {
+        // A tap shorter than a frame: the frame just drawn saw the finger down;
+        // the release goes in at once, before another touch can replace it.
+        release_waiting_ = false;
+        input_.down = false;
+        draw_frame_(now);
+      }
+    }
   }
   if (now - last_pub_ms_ >= 1000) {
     last_pub_ms_ = now;

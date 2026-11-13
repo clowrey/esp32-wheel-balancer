@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build and run DSP tests
+      - name: Build and run DSP and UI tests
         run: |
           cmake -S tests -B build/tests -DCMAKE_BUILD_TYPE=Release
           cmake --build build/tests -j
@@ -23,21 +23,14 @@ jobs:
           pip install pyPRB
           python3 tools/crosscheck_pyprb.py build/tests/balance_cli 300
 
-  ui-preview:
+  ui-sim:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch LVGL 9.5.0 (same version as ESPHome 2026.9)
-        run: git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git /tmp/lvgl
-      - name: Render every screen with the demo wheel
+      - name: Tap through a whole job with the demo wheel and render every screen
         run: |
-          cmake -S tools/ui_preview -B build/ui -DLVGL_DIR=/tmp/lvgl
-          cmake --build build/ui -j
-          mkdir -p shots
-          ./build/ui/ui_preview shots
           pip install pillow
-          python3 -c "import glob; from PIL import Image; [Image.open(p).save(p[:-4]+'.png') for p in glob.glob('shots/*.ppm')]"
-          rm shots/*.ppm
+          PYTHON=python3 sh tools/ui_sim/run.sh shots
       - uses: actions/upload-artifact@v4
         with:
           name: ui-screenshots

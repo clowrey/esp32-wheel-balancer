@@ -252,6 +252,7 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
 
   ModelCore m;
   BalanceJob &job = m.job();
+  m.set_auto_lock(0, 0);  // this test taps LOCK SPEED by hand (see the auto-lock test below)
   job.mutable_config().plane[0].trial_angle_deg = 0;
   job.mutable_config().plane[1].trial_angle_deg = 90;
   job.start();
@@ -329,4 +330,35 @@ TEST_CASE("simulated tire balance with two MPU-6050s and hand spins") {
   CHECK(res.within_iso[0]);
   CHECK(res.within_iso[1]);
   CHECK(res.reduction_pct[0] > 85);
+}
+
+TEST_CASE("auto lock: a steady drill speed locks the test speed by itself") {
+  ModelCore m;  // wheel defaults: auto lock 150-450 rpm
+  m.job().start();
+  m.start_run();
+  auto rev = [](double rpm, bool continuous) {
+    RevResult r;
+    r.rpm = rpm;
+    r.omega = rpm * 2 * M_PI / 60.0;
+    r.period = 250.0 * 60.0 / rpm;
+    r.period_change = continuous ? 0.001 : 0.0;
+    return r;
+  };
+  uint32_t t = 0;
+  // Spinning up through the range: not steady, no lock.
+  for (double rpm = 120; rpm < 230; rpm += 15) m.feed_rev(rev(rpm, true), t += 250);
+  CHECK(m.job().test_rpm() == 0);
+  // Five steady revolutions, then a gap: still no lock (the gap starts over).
+  for (int i = 0; i < 5; i++) m.feed_rev(rev(250 + (i % 2 ? 3 : -3), true), t += 240);
+  m.feed_rev(rev(250, false), t += 240);
+  CHECK(m.job().test_rpm() == 0);
+  // Six steady revolutions: locked near their mean.
+  for (int i = 0; i < 5; i++) m.feed_rev(rev(250 + (i % 2 ? 3 : -3), true), t += 240);
+  CHECK(m.job().test_rpm() == doctest::Approx(250).epsilon(0.02));
+  // Too fast for the range never locks.
+  ModelCore fast;
+  fast.job().start();
+  fast.start_run();
+  for (int i = 0; i < 20; i++) fast.feed_rev(rev(600, true), t += 100);
+  CHECK(fast.job().test_rpm() == 0);
 }

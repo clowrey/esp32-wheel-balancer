@@ -87,6 +87,8 @@ class BalanceJob {
   // Test speed (rpm), locked at RUN0 and used for every later run.
   double test_rpm() const { return test_rpm_; }
   void set_test_rpm(double rpm) { test_rpm_ = rpm; }
+  // Show masses in the instructions in ounces instead of grams (display only).
+  void set_mass_oz(bool oz) { mass_oz_ = oz; }
 
   // Operator instruction for the current step.
   std::string instruction() const;
@@ -124,6 +126,7 @@ class BalanceJob {
   const cplx *vverify() const { return vver_; }
 
  private:
+  bool mass_oz_ = false;
   bool compute_(std::string *error);
   void fill_plane_(int p, cplx u);
   double plane_iso_limit_gmm_(int p) const;

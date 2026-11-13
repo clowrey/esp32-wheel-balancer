@@ -1,5 +1,5 @@
 #pragma once
-// Shared types for the balancer DSP. Pure C++17: no ESPHome / IDF / LVGL.
+// Shared types for the balancer DSP. Pure C++17: no ESPHome / IDF.
 //
 // Vector convention used everywhere in dsp_*:
 //   * A vibration reading is a "lag-complex" number: amplitude * e^{+j*lag},
