@@ -1,6 +1,7 @@
 #include "balancer.h"
 
 #include <cmath>
+#include <cstring>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -11,6 +12,10 @@
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #endif
+#ifdef USE_ESP32
+#include "esphome/components/web_server_base/web_server_base.h"
+#include <esp_http_server.h>
+#endif
 
 #ifdef USE_ESP32
 #include "driver/gpio.h"
@@ -20,6 +25,61 @@ namespace esphome {
 namespace balancer {
 
 static const char *const TAG = "balancer";
+
+#ifdef USE_ESP32
+// GET /recording.bin: the recorder's raw readings, oldest first, for
+// tools/mpu_recording.py. A 64-byte header, then 12-byte records
+// (MpuAcquisition::RecRecord). Sent in chunks straight from PSRAM.
+class RecordingHandler : public AsyncWebHandler {
+ public:
+  explicit RecordingHandler(bal::MpuAcquisition *acq) : acq_(acq) {}
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    if (request->method() != HTTP_GET) return false;
+    char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    const auto url = request->url_to(buf);
+    return url == "/recording.bin";
+  }
+  void handleRequest(AsyncWebServerRequest *request) override {
+    httpd_req_t *req = *request;
+    uint64_t first = 0;
+    const size_t count = acq_->recorder_snapshot(&first);
+    const bal::MpuConfig &cfg = acq_->config();
+    struct __attribute__((packed)) Header {
+      char magic[4];
+      uint32_t header_len, record_size, count, sample_rate, range_g, capture_hz, sensors;
+      uint8_t axis_a, axis_b, filter_hz, reserved0;
+      uint8_t reserved[28];
+    } hd = {};
+    static_assert(sizeof(Header) == 64, "recording header");
+    memcpy(hd.magic, "WBR1", 4);
+    hd.header_len = sizeof(Header);
+    hd.record_size = sizeof(bal::MpuAcquisition::RecRecord);
+    hd.count = static_cast<uint32_t>(count);
+    hd.sample_rate = cfg.sample_rate;
+    hd.range_g = static_cast<uint32_t>(cfg.range_g);
+    hd.capture_hz = acq_->capture_hz();
+    hd.sensors = static_cast<uint32_t>(cfg.sensors);
+    hd.axis_a = static_cast<uint8_t>(cfg.axis[0]);
+    hd.axis_b = static_cast<uint8_t>(cfg.axis[1]);
+    hd.filter_hz = static_cast<uint8_t>(cfg.filter_hz);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"recording.bin\"");
+    if (httpd_resp_send_chunk(req, reinterpret_cast<const char *>(&hd), sizeof(hd)) != ESP_OK) return;
+    static constexpr size_t kChunk = 680;  // records per chunk (~8 KB)
+    std::unique_ptr<bal::MpuAcquisition::RecRecord[]> buf(new bal::MpuAcquisition::RecRecord[kChunk]);
+    for (size_t i = 0; i < count; i += kChunk) {
+      const size_t n = std::min(kChunk, count - i);
+      for (size_t k = 0; k < n; k++) buf[k] = acq_->recorder_at(first + i + k);
+      if (httpd_resp_send_chunk(req, reinterpret_cast<const char *>(buf.get()), n * sizeof(buf[0])) != ESP_OK) return;
+    }
+    httpd_resp_send_chunk(req, nullptr, 0);
+    ESP_LOGI(TAG, "recording sent: %u readings", (unsigned) count);
+  }
+
+ protected:
+  bal::MpuAcquisition *acq_;
+};
+#endif
 
 void BalancerComponent::set_tach(int pin, bool falling, bool pullup) {
   mpu_cfg_.pin_tach = pin;
@@ -99,8 +159,13 @@ void BalancerComponent::setup() {
     if (!acq_started_) {
       ESP_LOGE(TAG, "acquisition failed to start (check the sensor wiring and tach pin)");
       this->status_set_error(LOG_STR("acquisition failed"));
-    } else if (pc_log_at_boot_) {
-      set_pc_log(true);
+    } else {
+      if (pc_log_at_boot_) set_pc_log(true);
+      if (record_minutes_ > 0 && mpu_->set_recorder_minutes(record_minutes_) &&
+          web_server_base::global_web_server_base != nullptr) {
+        web_server_base::global_web_server_base->init();
+        web_server_base::global_web_server_base->add_handler(new RecordingHandler(mpu_.get()));  // NOLINT
+      }
     }
   }
 #endif

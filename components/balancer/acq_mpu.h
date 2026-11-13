@@ -95,6 +95,23 @@ class MpuAcquisition {
   void set_stream(bool on);
   bool streaming() const { return stream_.load(); }
 
+  // Recorder: the last few minutes of every raw reading and tach pulse, in
+  // PSRAM, for downloading and offline analysis (balancer.cpp serves it).
+  struct RecRecord {
+    uint32_t t_us;   // capture time, us since acquisition started (wraps after ~71 min)
+    uint8_t kind;    // 0 tach pulse, 1 sensor A, 2 sensor B
+    uint8_t axis;    // the axis that sensor was measuring (0 X, 1 Y, 2 Z)
+    int16_t xyz[3];  // raw counts (zero for a tach pulse)
+  };
+  static_assert(sizeof(RecRecord) == 12, "recorder file format");
+  bool set_recorder_minutes(float minutes);  // call after start(); allocates the ring
+  bool recording() const { return rec_ != nullptr; }
+  // Records [first, first + count) are stable to read now; index modulo capacity.
+  size_t recorder_snapshot(uint64_t *first) const;
+  const RecRecord &recorder_at(uint64_t i) const { return rec_[i % rec_cap_]; }
+  size_t recorder_capacity() const { return rec_cap_; }
+  const MpuConfig &config() const { return cfg_; }
+  uint32_t capture_hz() const { return cap_resolution_; }
   // --- internals used by the ISR trampoline ---
   struct Event {
     uint8_t kind;     // 0 tach, 1 sensor A ready, 2 sensor B ready
@@ -175,6 +192,14 @@ class MpuAcquisition {
   bool stream_ticks_init_ = false;
   uint32_t stream_last_ticks_ = 0;
   uint64_t stream_ticks64_ = 0;
+
+  void record_(uint8_t kind, uint32_t ticks, const int16_t *xyz);
+  RecRecord *rec_ = nullptr;
+  size_t rec_cap_ = 0;
+  std::atomic<uint64_t> rec_n_{0};
+  bool rec_ticks_init_ = false;
+  uint32_t rec_last_ticks_ = 0;
+  uint64_t rec_ticks64_ = 0;
 };
 
 }  // namespace bal

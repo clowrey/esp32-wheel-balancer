@@ -26,7 +26,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["lvgl"]
-AUTO_LOAD = ["sensor"]
+AUTO_LOAD = ["sensor", "web_server_base"]  # web_server_base: the recording download
 CODEOWNERS = ["@clowrey"]
 
 balancer_ns = cg.esphome_ns.namespace("balancer")
@@ -59,6 +59,7 @@ CONF_AXIS = "axis"
 CONF_MAX_SPEED_CHANGE = "max_speed_change"
 CONF_PC_LOG = "pc_log"
 CONF_WEIGHT_UNIT = "weight_unit"
+CONF_RECORD_MINUTES = "record_minutes"
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
 
@@ -196,6 +197,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_PC_LOG, default=False): cv.boolean,
             # Unit for balance weights on the screens until changed and saved in Settings.
             cv.Optional(CONF_WEIGHT_UNIT, default="g"): cv.one_of("g", "oz", lower=True),
+            # Keep the last N minutes of raw readings in PSRAM, downloadable at
+            # http://<board>/recording.bin (tools/mpu_recording.py). 0: off.
+            cv.Optional(CONF_RECORD_MINUTES, default=10): cv.float_range(min=0, max=60),
             cv.Optional(CONF_RPM): sensor.sensor_schema(
                 unit_of_measurement="rpm",
                 icon="mdi:rotate-right",
@@ -235,6 +239,7 @@ async def to_code(config):
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
     cg.add(var.set_pc_log_at_boot(config[CONF_PC_LOG]))
     cg.add(var.set_weight_unit_oz(config[CONF_WEIGHT_UNIT] == "oz"))
+    cg.add(var.set_record_minutes(config[CONF_RECORD_MINUTES]))
     if CONF_MAX_SPEED_CHANGE in config:
         cg.add(var.set_max_speed_change(config[CONF_MAX_SPEED_CHANGE]))
     mpu = config[CONF_MPU6050]

@@ -11,6 +11,7 @@
 #include "driver/mcpwm_cap.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 
 namespace bal {
@@ -377,6 +378,54 @@ void MpuAcquisition::stream_push_(int s, uint32_t ticks, const int16_t xyz[3]) {
   bt.n = 0;
 }
 
+bool MpuAcquisition::set_recorder_minutes(float minutes) {
+  if (minutes <= 0) return false;
+  // Both sensors' readings plus tach pulses (a few per second).
+  const double per_s = 2.0 * cfg_.sample_rate + 20.0;
+  const size_t n = static_cast<size_t>(minutes * 60.0 * per_s);
+  auto *p = static_cast<RecRecord *>(heap_caps_malloc(n * sizeof(RecRecord), MALLOC_CAP_SPIRAM));
+  if (p == nullptr) {
+    ESP_LOGE(TAG, "recorder: no PSRAM for %.1f min (%u KB)", minutes, (unsigned) (n * sizeof(RecRecord) / 1024));
+    return false;
+  }
+  // The task is already running: capacity first, then the pointer it checks.
+  rec_cap_ = n;
+  std::atomic_thread_fence(std::memory_order_release);
+  rec_ = p;
+  ESP_LOGI(TAG, "recorder: last %.1f min of raw readings in PSRAM (%u KB)", minutes,
+           (unsigned) (n * sizeof(RecRecord) / 1024));
+  return true;
+}
+
+// Called from the task only. Timestamps are the capture timer extended to
+// 64 bits, in microseconds since acquisition started.
+void MpuAcquisition::record_(uint8_t kind, uint32_t ticks, const int16_t *xyz) {
+  if (rec_ == nullptr) return;
+  if (!rec_ticks_init_) {
+    rec_last_ticks_ = ticks;
+    rec_ticks64_ = 0;
+    rec_ticks_init_ = true;
+  }
+  rec_ticks64_ += static_cast<int32_t>(ticks - rec_last_ticks_);  // signed: edges may arrive a little out of order
+  rec_last_ticks_ = ticks;
+  const uint64_t n = rec_n_.load(std::memory_order_relaxed);
+  RecRecord &r = rec_[n % rec_cap_];
+  r.t_us = static_cast<uint32_t>(rec_ticks64_ / (cap_resolution_ / 1000000u));
+  r.kind = kind;
+  r.axis = static_cast<uint8_t>(kind > 0 ? axis_[kind - 1].load(std::memory_order_relaxed) : 0);
+  for (int k = 0; k < 3; k++) r.xyz[k] = xyz ? xyz[k] : 0;
+  rec_n_.store(n + 1, std::memory_order_release);
+}
+
+size_t MpuAcquisition::recorder_snapshot(uint64_t *first) const {
+  const uint64_t n = rec_n_.load(std::memory_order_acquire);
+  const uint64_t count = std::min<uint64_t>(n, rec_cap_);
+  // Leave a margin: the task keeps writing while the snapshot is sent.
+  const uint64_t margin = std::min<uint64_t>(count, 2 * cfg_.sample_rate + 20);
+  *first = n - count + margin;
+  return static_cast<size_t>(count - margin);
+}
+
 bool MpuAcquisition::pop(RevResult &out) {
   if (rev_queue_ == nullptr) return false;
   return xQueueReceive(rev_queue_, &out, 0) == pdTRUE;
@@ -399,6 +448,7 @@ void MpuAcquisition::task_() {
       status_.tach_pulses.fetch_add(1, std::memory_order_relaxed);
       status_.last_tach_ms.store(now_ms);
       resampler_.push_tach(e.ticks);
+      record_(0, e.ticks, nullptr);
     } else if (got) {
       const int s = e.kind - 1;
       uint8_t b[6];
@@ -441,6 +491,7 @@ void MpuAcquisition::task_() {
         raw_[s][w % kRawLen] = g;
         raw_n_[s].store(w + 1, std::memory_order_release);
         if (stream_.load(std::memory_order_relaxed)) stream_push_(s, e.ticks, xyz);
+        record_(1 + s, e.ticks, xyz);
         sum_[s] += g;
         sq_sum_[s] += static_cast<double>(g) * g;
         stat_n_[s]++;
