@@ -398,7 +398,7 @@ void MpuAcquisition::task_() {
       uint8_t b[6];
       if (edge_count_[e.kind].load(std::memory_order_relaxed) != e.count) {
         // The task fell behind and a newer reading has replaced this one.
-        missed_++;
+        missed_++;  missed_s_[s]++;
       } else if (fail_streak_[s] >= kFailBackoff && now_ms < next_try_ms_[s]) {
         // This sensor keeps failing: only try it every kBackoffMs, so its
         // timeouts can't starve the other sensor.
@@ -414,7 +414,7 @@ void MpuAcquisition::task_() {
         }
       } else if (edge_count_[e.kind].load(std::memory_order_relaxed) != e.count) {
         // A new reading landed during the read: no telling which one we got.
-        missed_++;
+        missed_++;  missed_s_[s]++;
       } else {
         if (fail_streak_[s] >= kFailBackoff) ESP_LOGI(TAG, "sensor %c: reads working again", 'A' + s);
         fail_streak_[s] = 0;
@@ -501,6 +501,10 @@ void MpuAcquisition::task_() {
       status_.measured_fs.store(static_cast<float>(resampler_.measured_rate(0)));
       status_.resyncs.store(resampler_.restarts());
       status_.dma_overflows.store(missed_ + i2c_errors_);
+      for (int c = 0; c < 2; c++) {
+        status_.read_errors[c].store(sensor_errors_[c]);
+        status_.missed[c].store(missed_s_[c]);
+      }
       status_.glitches.store(analyzer_.glitches());
       if (i2c_errors_ != warned_errors && now_ms - last_warn_ms >= 5000) {
         ESP_LOGW(TAG,
