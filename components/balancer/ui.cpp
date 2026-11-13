@@ -422,6 +422,9 @@ void BalancerUi::ask_number_(const char *title, double current, int decimals, st
   lv_obj_set_style_text_font(ta, F28, 0);
   lv_textarea_set_text(ta, fmt("%.*f", decimals, current).c_str());
   lv_obj_t *kb = lv_keyboard_create(p);
+  // lv_keyboard_create aligns itself to the parent's bottom; without this the
+  // position below is an offset from there and the pad runs off the screen.
+  lv_obj_set_align(kb, LV_ALIGN_TOP_LEFT);
   lv_obj_set_pos(kb, 24, 150);
   lv_obj_set_size(kb, 552, 370);
   lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
