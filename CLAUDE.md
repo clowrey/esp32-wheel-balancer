@@ -15,20 +15,24 @@ was removed on 2026-11-12 (it is in git history).
   clowrey/CellKeeper-BMS-LCD, which runs on the same board.
 - Board config: `hardware_guition_jc1060p470.yaml` (known-good, from CellKeeper).
   Don't change display, touch, PSRAM or LDO settings without a reason.
-- UI: C++ against LVGL 9.5 (`ui.cpp`), talking only to `UiModel`
-  (`ui_model.h`). `ModelCore` (`ui_core.cpp`) is shared by the firmware and
-  `tools/ui_preview`, which renders every screen to PNG on a PC; check UI
-  changes there before pushing. New LVGL widgets or fonts must be added to
-  UI_WIDGETS / UI_FONTS in `__init__.py`.
+- UI: plain C++, no LVGL. The screens (`ui.cpp`, `ui_screens.cpp`) draw into
+  an RGB565 frame in PSRAM (`ui_canvas.*`, from CellKeeper's `hmi_ui`) and
+  only the 16-row bands that changed are sent to the panel. They talk only to
+  `UiModel` (`ui_model.h`). Immediate mode: a screen runs top to bottom every
+  frame and `button(...)` returns true when tapped (`ui_kit.h`). `ModelCore`
+  (`ui_core.cpp`) is shared by the firmware, `tools/ui_sim` (renders every
+  screen to PNG) and `tests/test_ui.cpp` (taps by label); check UI changes
+  there before pushing. Fonts are generated: add a size or character in
+  `tools/gen_ui_fonts.py` and run it, never edit `ui_fonts_data.cpp`.
 - Sensor path: `acq_mpu` reads the MPU-6050s and `dsp_resample` puts them on
   one grid (PLAN §4, `docs/hardware/tire-rig.md`). Starting values for a
   wheel are in `ModelCore::load_defaults`.
 - Component files are flat (ESPHome ignores subdirectories of external
-  components): `dsp_*` pure C++, `acq_*` ESP-IDF, `ui*` LVGL, `balancer.*` glue.
+  components): `dsp_*` pure C++, `acq_*` ESP-IDF, `ui*` pure C++, `balancer.*` glue.
   DSP namespace is `bal` (not `balancer`, which is ESPHome's).
 
 ## Rules
-- `dsp_*` files are pure C++17: no ESPHome, IDF or LVGL headers.
+- `dsp_*` and `ui*` files are pure C++17: no ESPHome or IDF headers.
   It must build and pass tests on the host (`tests/`, CMake + doctest).
 - Real-time acquisition (`acq_mpu`) runs in its own FreeRTOS
   task pinned to core 1. Never do sensor I²C, MCPWM or DSP work in
@@ -54,5 +58,6 @@ was removed on 2026-11-12 (it is in git history).
   firmware is compiled by GitHub Actions; compile errors show up as check-run
   annotations and binaries on the `latest` pre-release.
 - Host tests: `cmake -S tests -B build/tests && cmake --build build/tests && ctest --test-dir build/tests`
-- UI preview: `cmake -S tools/ui_preview -B build/ui -DLVGL_DIR=<lvgl v9.5.0> && cmake --build build/ui && build/ui/ui_preview <outdir>`
+- UI simulator: `sh tools/ui_sim/run.sh [outdir]` (g++ and Python with Pillow;
+  default outdir `docs/ui`).
 - `secrets.yaml` is gitignored; copy `secrets.yaml.example`.

@@ -101,9 +101,9 @@ or `esptool.py write_flash 0x0 <file>`, then use `.ota.bin` files or
 - `components/balancer/`: ESPHome component (flat layout)
   - `dsp_*` pure C++: revolution analysis, resampler, measurement, solver, job, demo wheel
   - `acq_mpu.*` MPU-6050 acquisition task: I²C reads timed by MCPWM capture
-  - `ui*.{h,cpp}` LVGL screens and shared model; `balancer.*` ESPHome glue
+  - `ui*.{h,cpp}` touchscreen screens drawn in plain C++ (no LVGL) and the shared model; `balancer.*` ESPHome glue
 - `tests/`: host tests (`cmake -S tests -B build/tests && ctest --test-dir build/tests`)
-- `tools/ui_preview/`: renders every screen on a PC
+- `tools/ui_sim/`: taps through a whole job on a PC and renders every screen (`sh tools/ui_sim/run.sh`)
 - `tools/crosscheck_pyprb.py`: solver cross-check against pyPRB
 - `docs/hardware/`: pinout (JP1), wiring image, tire rig, schematic
 - `hardware/display_case/`: 3D-printable rear case (build123d, STEP)

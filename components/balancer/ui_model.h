@@ -1,7 +1,7 @@
 #pragma once
 // What the touchscreen UI needs from the rest of the firmware. The ESPHome
-// component implements this on the device; tools/ui_preview implements it
-// on a PC with the simulated wheel so screens can be rendered to images.
+// component implements this on the device; on a PC (tools/ui_sim, the host
+// tests) ModelCore with the simulated wheel does.
 
 #include <string>
 #include <vector>

@@ -51,14 +51,5 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
-lvgl:
-  displays: my_display
-  touchscreens: my_touchscreen
-  buffer_size: 25%
-  byte_order: little_endian
-  bg_color: 0x0f1419
-  widgets:
-    - label:
-        text: "Starting balancer..."
-        align: CENTER
-        text_color: 0xe6edf3
+# The screens are drawn by the balancer component itself (components/balancer/ui*.cpp, no
+# LVGL) on the display and touch panel in the hardware file.

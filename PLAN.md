@@ -62,8 +62,11 @@ CellKeeper-BMS-LCD.
   analysis) live in C++ in `components/balancer`, on their own FreeRTOS task
   pinned to core 1, using the IDF drivers directly. ESPHome's `loop()` only
   consumes finished revolutions.
-- The UI is C++ against LVGL 9 inside the component (dials, polar plots and
-  the wizard were awkward in ESPHome LVGL YAML).
+- The UI is plain C++ inside the component that draws straight into an RGB565
+  frame in PSRAM and sends only the rows that changed to the panel (the same
+  approach as the CellKeeper HMI, on the same board). It started on LVGL 9;
+  that was dropped on 2026-11-12: LVGL's draw buffer took 307 KB of internal
+  RAM, which the Wi-Fi co-processor link needs.
 - OTA, web server and Home Assistant come for free.
 
 ---
@@ -220,7 +223,7 @@ limit (the uncapped rule asks for far too much at a few hundred rpm).
 
 ---
 
-## 7. UI (LVGL 9, 1024×600 landscape)
+## 7. UI (1024×600 landscape, drawn by the component, no LVGL)
 
 Status bar on every screen: RPM, sensor levels, tach status.
 
@@ -240,7 +243,8 @@ Status bar on every screen: RPM, sensor levels, tach status.
 6. **Settings:** sensor polarity, units, speed window, revolutions per run,
    phase threshold.
 
-Screens rendered on a PC by `tools/ui_preview` are in `docs/ui/`.
+Screens rendered on a PC by `tools/ui_sim` (the same code, tapped through a
+whole job with the demo wheel) are in `docs/ui/`.
 
 ---
 
@@ -256,7 +260,7 @@ esp32-wheel-balancer/
 ├── balancer-common.yaml                # board, network, display
 ├── hardware_guition_jc1060p470.yaml    # board config from CellKeeper
 ├── components/balancer/
-│   ├── __init__.py                     # YAML schema, codegen, LVGL widget/font registration
+│   ├── __init__.py                     # YAML schema, codegen
 │   ├── balancer.{h,cpp}                # ESPHome glue: acquisition, NVS, sensors
 │   ├── acq_mpu.{h,cpp}                 # ESP-IDF: MPU-6050 on I2C, timed by MCPWM capture
 │   ├── dsp_types.h                     # conventions (lag-complex vectors, g*mm weights)
@@ -267,9 +271,13 @@ esp32-wheel-balancer/
 │   ├── dsp_job.{h,cpp}                 # wizard state and arithmetic
 │   ├── dsp_sim.{h,cpp}                 # revolution-level demo wheel
 │   ├── ui_model.h, ui_core.{h,cpp}     # what the UI needs + shared implementation
-│   └── ui.{h,cpp}                      # LVGL 9 screens, dials, polar plots
+│   ├── ui.{h,cpp}, ui_screens.cpp      # the screens, dials, polar plots, pop-ups
+│   ├── ui_kit.{h,cpp}                  # touch, widgets, text
+│   ├── ui_canvas.{h,cpp}               # RGB565 frame, shapes, text (from CellKeeper)
+│   └── ui_fonts*                       # generated from fonts/ by tools/gen_ui_fonts.py
 ├── tests/                              # doctest host suite + rotor and sensor simulators
-├── tools/                              # balance_cli, pyPRB cross-check, ui_preview
+├── tools/                              # balance_cli, pyPRB cross-check, ui_sim, font generator
+├── fonts/                              # Roboto (OFL) for the UI
 ├── ci/                                 # CI secrets stub
 └── docs/  (hardware/, ui/ screenshots, research/)
 ```
@@ -287,7 +295,8 @@ esp32-wheel-balancer/
 - Cross-check against pyPRB: agreement 2e-8 over 300 random cases.
 
 ### Phase 2 — UI  — DONE (screens in docs/ui; demo firmware)
-- Wizard state machine in C++ (`dsp_job`), UI in C++ against LVGL 9.
+- Wizard state machine in C++ (`dsp_job`), UI in plain C++ drawing its own frame
+  (LVGL 9 until 2026-11-12).
 
 ### Phase 3 — MPU-6050 acquisition  — written; simulated end to end; bench test in progress
 - Host test: two sensors on their own clocks with noise, lost readings and

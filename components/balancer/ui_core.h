@@ -1,7 +1,7 @@
 #pragma once
 // Shared implementation of UiModel: job, runs, live averages, demo wheel.
 // The ESPHome component derives from it and adds acquisition + persistence;
-// tools/ui_preview uses it directly.
+// tools/ui_sim and the host tests use it directly.
 
 #include <cstdint>
 #include <deque>
