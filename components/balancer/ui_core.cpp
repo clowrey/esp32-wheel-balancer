@@ -54,7 +54,10 @@ void ModelCore::load_defaults() {
   // On a soft rig the displacement barely depends on speed, so a wide
   // window in displacement units is honest.
   UiSettings st;
-  for (int c = 0; c < kChannels; c++) st.invert[c] = settings_.invert[c];  // set from YAML
+  for (int c = 0; c < kChannels; c++) {  // set from YAML
+    st.invert[c] = settings_.invert[c];
+    st.axis[c] = settings_.axis[c];
+  }
   st.quantity = Quantity::DISPLACEMENT_UM;
   st.window = 0.10;
   st.target_revs = 20;

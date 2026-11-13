@@ -834,16 +834,48 @@ void BalancerUi::build_settings_() {
        });
   number_row_(rows, colm, "Max phase uncertainty", "°", 1, [&st]() -> double & { return st.max_phase_unc_deg; }, 0.2, 20, apply);
 
+  lv_obj_t *help = text(left,
+                        "Axes: rock a sensor's mount the way it should measure\n"
+                        "and tap DETECT, or pick X / Y / Z. Gravity shows which\n"
+                        "axis is vertical. Changing an axis means starting the\n"
+                        "job again. Changes apply now; SAVE keeps them.",
+                        F14, kMuted, 16, 330);
+  (void) help;
+
+  // Right: which axis each sensor measures, and the network.
   lv_obj_t *right = box(s, 592, 66, 416, 458);
-  lv_obj_t *t = text(right,
-                     "Sensors: digital accelerometers,\nalready calibrated in g.\n\n"
-                     "Polarity: flip a sensor that is\nmounted facing the other way.\n\n"
-                     "Units: what readings and the\npolar plots show. Balancing works\nin any unit.\n\n"
-                     "Speed window: revolutions outside\ntarget +/- window are ignored.\n\n"
-                     "TEACH TACH: hold it like the teach\nkey on the LX-101 tach sensor.\n\n"
-                     "Changes apply immediately.\nSAVE keeps them after a reboot.",
-                     F20, kMuted, 16, 14);
-  (void) t;
+  text(right, "SENSOR AXES", F14, kMuted, 12, 8);
+  const uint32_t chc[2] = {kChA, kChB};
+  for (int c = 0; c < 2; c++) {
+    const int y0 = 32 + c * 150;
+    text(right, c == 0 ? "A" : "B", F28, chc[c], 14, y0 + 6);
+    for (int k = 0; k < 3; k++) {
+      lv_obj_t *ab = button_(
+          right, k == 0 ? "X" : (k == 1 ? "Y" : "Z"), F20,
+          [this, c, k]() {
+            UiSettings &st = model_->settings();
+            if (st.axis[c] == k) return;
+            st.axis[c] = k;
+            model_->apply_settings(false);
+            refresh_rows_(settings_rows_);
+            toast_(fmt("Sensor %c now reads %c. Runs measured before this no longer match: start the job "
+                       "again. SAVE keeps it.",
+                       'A' + c, "XYZ"[k]));
+          },
+          col(kPanel2));
+      lv_obj_set_pos(ab, 50 + k * 72, y0);
+      lv_obj_set_size(ab, 64, 44);
+      s_axis_btn_[c][k] = ab;
+    }
+    s_detect_btn_[c] = button_(right, "DETECT", F20, [this, c]() { start_detect_(c); }, col(kAccent));
+    lv_obj_set_pos(s_detect_btn_[c], 274, y0);
+    lv_obj_set_size(s_detect_btn_[c], 128, 44);
+    s_axis_info_[c] = text(right, "", F14, kText, 14, y0 + 52);
+  }
+  text(right, "NETWORK", F14, kMuted, 12, 336);
+  s_net_ = text(right, "", F14, kText, 12, 356);
+  lv_obj_set_width(s_net_, 392);
+  lv_label_set_long_mode(s_net_, LV_LABEL_LONG_MODE_WRAP);
 
   lv_obj_t *b = button_(s, LV_SYMBOL_HOME "  Home", F20, [this]() { show(HOME); }, col(kPanel2));
   lv_obj_set_pos(b, 16, 536);
@@ -875,6 +907,72 @@ void BalancerUi::build_settings_() {
   }, col(kGreen));
   lv_obj_set_pos(b, 788, 536);
   lv_obj_set_size(b, 220, 52);
+}
+
+// Axis auto-detect: the person rocks or shakes the assembly the way this
+// sensor should measure, and the axis with by far the most AC motion over
+// the next few seconds wins. Gravity (the mean) is ignored, so the vertical
+// axis only wins if the motion really is vertical.
+static constexpr uint32_t kDetectMs = 3000;
+
+void BalancerUi::start_detect_(int ch) {
+  if (model_->live().raw_n[ch] == 0 && !model_->simulate()) {
+    toast_(fmt("Sensor %c is not giving readings.", 'A' + ch));
+    return;
+  }
+  det_ch_ = ch;
+  det_end_ms_ = lv_tick_get() + kDetectMs;
+  for (float &p : det_peak_) p = 0;
+  toast_(fmt("Rock or shake sensor %c's mount the way it should measure, for 3 seconds...", 'A' + ch));
+}
+
+void BalancerUi::update_settings_() {
+  const LiveData &lv = model_->live();
+  const UiSettings &st = model_->settings();
+  static const char kAx[] = "XYZ";
+  for (int c = 0; c < 2; c++) {
+    for (int k = 0; k < 3; k++)
+      lv_obj_set_style_bg_color(s_axis_btn_[c][k], col(st.axis[c] == k ? (c == 0 ? kChA : kChB) : kPanel2), 0);
+    const float *m = lv.axis_mean[c], *r = lv.axis_rms[c];
+    std::string state = fmt("measuring %c", kAx[st.axis[c]]);
+    if (det_ch_ == c) state = "DETECTING: keep rocking...";
+    lv_label_set_text(s_axis_info_[c], fmt("gravity  X %+.2f  Y %+.2f  Z %+.2f g\n"
+                                           "shake    X %.1f  Y %.1f  Z %.1f mg rms\n%s",
+                                           m[0], m[1], m[2], r[0] * 1000, r[1] * 1000, r[2] * 1000, state.c_str())
+                                           .c_str());
+  }
+  if (det_ch_ >= 0) {
+    const int c = det_ch_;
+    for (int k = 0; k < 3; k++) det_peak_[k] = std::max(det_peak_[k], lv.axis_rms[c][k]);
+    if (static_cast<int32_t>(lv_tick_get() - det_end_ms_) >= 0) {
+      det_ch_ = -1;
+      int best = 0;
+      for (int k = 1; k < 3; k++)
+        if (det_peak_[k] > det_peak_[best]) best = k;
+      float second = 0;
+      for (int k = 0; k < 3; k++)
+        if (k != best) second = std::max(second, det_peak_[k]);
+      if (det_peak_[best] < 0.005f) {
+        toast_(fmt("Sensor %c barely moved (%.1f mg). Rock it harder and tap DETECT again.", 'A' + c,
+                   det_peak_[best] * 1000));
+      } else if (det_peak_[best] < 1.5f * second) {
+        toast_(fmt("No clear axis for sensor %c (X %.0f, Y %.0f, Z %.0f mg). Rock it in one direction only, or "
+                   "pick X/Y/Z by hand.",
+                   'A' + c, det_peak_[0] * 1000, det_peak_[1] * 1000, det_peak_[2] * 1000));
+      } else {
+        UiSettings &sm = model_->settings();
+        const bool changed = sm.axis[c] != best;
+        sm.axis[c] = best;
+        model_->apply_settings(false);
+        toast_(fmt("Sensor %c: %c axis (%.0f mg, next %.0f mg).%s", 'A' + c, kAx[best], det_peak_[best] * 1000,
+                   second * 1000, changed ? " Start the job again; SAVE keeps it." : " Unchanged."));
+      }
+    }
+  }
+  if (s_net_ != nullptr) {
+    const std::string net = model_->network_status();
+    lv_label_set_text(s_net_, net.empty() ? "not available here" : net.c_str());
+  }
 }
 
 // ============================================================================
@@ -926,6 +1024,9 @@ void BalancerUi::update() {
       break;
     case LIVE:
       update_live_();
+      break;
+    case SETTINGS:
+      update_settings_();
       break;
     default:
       break;

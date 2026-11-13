@@ -100,6 +100,11 @@ void MpuAcquisition::set_invert(int ch, bool invert) {
   invert_[ch].store(invert);
 }
 
+void MpuAcquisition::set_axis(int ch, int axis) {
+  if (ch < 0 || ch > 1 || axis < 0 || axis > 2) return;
+  axis_[ch].store(axis);
+}
+
 bool MpuAcquisition::new_bus_(int b, int sda, int scl, bool low_power) {
   i2c_master_bus_config_t bcfg = {};
   bcfg.sda_io_num = static_cast<gpio_num_t>(sda);
@@ -273,6 +278,7 @@ bool MpuAcquisition::start(const MpuConfig &cfg) {
     status_.rms_g[c].store(0);
     status_.peak_frac[c].store(0);
     invert_[c].store(cfg_.invert[c]);
+    axis_[c].store(cfg_.axis[c]);
   }
   for (auto &e : edge_count_) e.store(0);
   g_per_count_ = static_cast<float>(cfg_.range_g) / 32768.0f;
@@ -421,7 +427,13 @@ void MpuAcquisition::task_() {
         int16_t xyz[3];
         for (int k = 0; k < 3; k++)
           xyz[k] = static_cast<int16_t>((static_cast<uint16_t>(b[2 * k]) << 8) | b[2 * k + 1]);
-        const int16_t raw = xyz[cfg_.axis[s]];
+        const int16_t raw = xyz[axis_[s].load(std::memory_order_relaxed)];
+        // Every axis, for the axis picker on the settings screen.
+        for (int k = 0; k < 3; k++) {
+          const double v = static_cast<double>(xyz[k]) * g_per_count_;
+          ax_sum_[s][k] += v;
+          ax_sq_[s][k] += v * v;
+        }
         float g = static_cast<float>(raw) * g_per_count_;
         if (invert_[s].load(std::memory_order_relaxed)) g = -g;
         // Recent readings for the LIVE screen's raw trace.
@@ -465,6 +477,12 @@ void MpuAcquisition::task_() {
       for (int c = 0; c < 2; c++) {
         if (c < cfg_.sensors) alive = alive && (now_ms - last_reading_ms[c] < 300);
         if (stat_n_[c] > 0) {
+          for (int k = 0; k < 3; k++) {
+            const double m = ax_sum_[c][k] / stat_n_[c];
+            const double v = ax_sq_[c][k] / stat_n_[c] - m * m;
+            status_.axis_mean[c][k].store(static_cast<float>(m));
+            status_.axis_rms[c][k].store(static_cast<float>(std::sqrt(v > 0 ? v : 0)));
+          }
           // AC part only: gravity and tilt sit on every reading.
           const double mean = sum_[c] / stat_n_[c];
           const double var = sq_sum_[c] / stat_n_[c] - mean * mean;
@@ -474,6 +492,7 @@ void MpuAcquisition::task_() {
         }
         status_.peak_frac[c].store(peak_[c]);
         sum_[c] = sq_sum_[c] = 0;
+        for (int k = 0; k < 3; k++) ax_sum_[c][k] = ax_sq_[c][k] = 0;
         peak_[c] = 0;
         stat_n_[c] = 0;
       }

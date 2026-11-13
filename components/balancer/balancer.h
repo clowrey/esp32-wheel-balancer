@@ -25,7 +25,7 @@ struct SavedState {
   double machine_rpm;
   bal::JobConfig machine_cfg;
 };
-static constexpr uint32_t kStateMagic = 0xBA1A0002;
+static constexpr uint32_t kStateMagic = 0xBA1A0003;  // 3: UiSettings gained axis[]
 
 class BalancerComponent : public Component, public bal::ModelCore {
  public:
@@ -53,6 +53,7 @@ class BalancerComponent : public Component, public bal::ModelCore {
   void set_tach_teach_pin(int pin) { teach_pin_ = pin; }
 
   // --- UiModel ---
+  std::string network_status() const override;
   bool pc_log() const override;
   void set_pc_log(bool on) override;
   bool has_tach_teach() const override { return teach_pin_ >= 0; }

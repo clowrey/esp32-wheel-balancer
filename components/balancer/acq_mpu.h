@@ -37,6 +37,10 @@ struct AcqStatus {
   std::atomic<uint32_t> last_tach_ms{0};
   std::atomic<float> measured_fs{0};
   std::atomic<float> rms_g[2];
+  // Every axis of each sensor over the last second, for the axis picker:
+  // mean (mostly gravity, so it shows which axis is vertical) and AC rms.
+  std::atomic<float> axis_mean[2][3] = {};
+  std::atomic<float> axis_rms[2][3] = {};
   std::atomic<float> peak_frac[2];  // largest |sample| / full scale over the last second
   std::atomic<uint32_t> read_errors[2] = {};  // I2C reads that failed, per sensor
   std::atomic<uint32_t> missed[2] = {};       // readings overwritten before they could be read, per sensor
@@ -76,6 +80,8 @@ class MpuAcquisition {
   const AcqStatus &status() const { return status_; }
   // Only the polarity can change at runtime: the sensor already reports g.
   void set_invert(int ch, bool invert);
+  // Which sensor axis (0 X, 1 Y, 2 Z) feeds the measurement; changeable at runtime.
+  void set_axis(int ch, int axis);
   const char *chip_name(int ch) const { return chip_[ch]; }
   double filter_delay_s(int ch) const { return delay_s_[ch]; }
 
@@ -128,6 +134,8 @@ class MpuAcquisition {
   double delay_s_[2] = {0, 0};
   uint32_t delay_ticks_[2] = {0, 0};
   std::atomic<bool> invert_[2];
+  std::atomic<int> axis_[2] = {};
+  double ax_sum_[2][3] = {}, ax_sq_[2][3] = {};
   // Running stats for the status page.
   double sum_[2] = {0, 0}, sq_sum_[2] = {0, 0};
   float peak_[2] = {0, 0};
