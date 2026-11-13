@@ -835,8 +835,8 @@ void BalancerUi::build_settings_() {
   number_row_(rows, colm, "Max phase uncertainty", "°", 1, [&st]() -> double & { return st.max_phase_unc_deg; }, 0.2, 20, apply);
 
   lv_obj_t *help = text(left,
-                        "Axes: rock a sensor's mount the way it should measure\n"
-                        "and tap DETECT, or pick X / Y / Z. Gravity shows which\n"
+                        "Axes: tap FIND AXES and push the tyre the way the arrow\n"
+                        "shows, or pick X / Y / Z. Gravity shows which\n"
                         "axis is vertical. Changing an axis means starting the\n"
                         "job again. Changes apply now; SAVE keeps them.",
                         F14, kMuted, 16, 330);
@@ -847,7 +847,7 @@ void BalancerUi::build_settings_() {
   text(right, "SENSOR AXES", F14, kMuted, 12, 8);
   const uint32_t chc[2] = {kChA, kChB};
   for (int c = 0; c < 2; c++) {
-    const int y0 = 32 + c * 150;
+    const int y0 = 32 + c * 112;
     text(right, c == 0 ? "A" : "B", F28, chc[c], 14, y0 + 6);
     for (int k = 0; k < 3; k++) {
       lv_obj_t *ab = button_(
@@ -867,11 +867,12 @@ void BalancerUi::build_settings_() {
       lv_obj_set_size(ab, 64, 44);
       s_axis_btn_[c][k] = ab;
     }
-    s_detect_btn_[c] = button_(right, "DETECT", F20, [this, c]() { start_detect_(c); }, col(kAccent));
-    lv_obj_set_pos(s_detect_btn_[c], 274, y0);
-    lv_obj_set_size(s_detect_btn_[c], 128, 44);
-    s_axis_info_[c] = text(right, "", F14, kText, 14, y0 + 52);
+    s_axis_info_[c] = text(right, "", F14, kText, 274, y0 - 2);
+    s_axis_grav_[c] = text(right, "", F14, kMuted, 14, y0 + 52);
   }
+  lv_obj_t *fb = button_(right, "FIND AXES (guided)", F20, [this]() { open_detect_(); }, col(kAccent));
+  lv_obj_set_pos(fb, 12, 262);
+  lv_obj_set_size(fb, 392, 50);
   text(right, "NETWORK", F14, kMuted, 12, 336);
   s_net_ = text(right, "", F14, kText, 12, 356);
   lv_obj_set_width(s_net_, 392);
@@ -907,23 +908,201 @@ void BalancerUi::build_settings_() {
   }, col(kGreen));
   lv_obj_set_pos(b, 788, 536);
   lv_obj_set_size(b, 220, 52);
+  build_detect_(s);  // last, so it sits on top
 }
 
-// Axis auto-detect: the person rocks or shakes the assembly the way this
-// sensor should measure, and the axis with by far the most AC motion over
-// the next few seconds wins. Gravity (the mean) is ignored, so the vertical
-// axis only wins if the motion really is vertical.
-static constexpr uint32_t kDetectMs = 3000;
+// Guided axis finder. The person pushes the wheel the way one sensor should
+// measure; the axis with clearly the most AC motion (gravity removed) wins.
+// Sensor A: forward and back (the way the car drives). Sensor B: in and out
+// along the axle. Seen from above, as drawn on the screen.
+static constexpr uint32_t kDetectMs = 4000;
 
-void BalancerUi::start_detect_(int ch) {
-  if (model_->live().raw_n[ch] == 0 && !model_->simulate()) {
-    toast_(fmt("Sensor %c is not giving readings.", 'A' + ch));
-    return;
+void BalancerUi::build_detect_(lv_obj_t *scr) {
+  lv_obj_t *o = box(scr, 24, 64, 976, 468, 0x111827);
+  lv_obj_set_style_border_color(o, col(kAccent), 0);
+  lv_obj_set_style_border_width(o, 2, 0);
+  det_overlay_ = o;
+  det_title_ = text(o, "", F28, kText, 20, 12);
+
+  // Top view: tyre on the left, axle to the knuckle on the right.
+  lv_obj_t *pic = box(o, 20, 60, 420, 330, kPanel);
+  lv_obj_t *tyre = box(pic, 60, 45, 70, 240, 0x374151, 18);
+  (void) tyre;
+  text(pic, "tyre", F14, kMuted, 72, 290);
+  for (int i = 0; i < 2; i++) det_axle_pts_[i] = {static_cast<lv_value_precise_t>(i ? 300 : 130), 165};
+  line(pic, det_axle_pts_, 2, kMuted, 8);
+  lv_obj_t *kn = box(pic, 300, 115, 34, 100, 0x4b5563, 6);
+  (void) kn;
+  text(pic, "knuckle", F14, kMuted, 286, 220);
+  text(pic, "axle", F14, kMuted, 196, 140);
+  text(pic, "VIEW FROM ABOVE", F14, kMuted, 10, 8);
+  text(pic, "car front", F14, kMuted, 10, 30);
+  // Arrow A: forward / back (vertical in this view), beside the tyre.
+  det_arrow_a_[0] = {30, 60};
+  det_arrow_a_[1] = {30, 270};
+  det_head_a_[0] = {18, 80};
+  det_head_a_[1] = {30, 60};
+  det_head_a_[2] = {42, 80};
+  det_head_a2_[0] = {18, 250};
+  det_head_a2_[1] = {30, 270};
+  det_head_a2_[2] = {42, 250};
+  det_line_a_[0] = line(pic, det_arrow_a_, 2, kChA, 6);
+  det_line_a_[1] = line(pic, det_head_a_, 3, kChA, 6);
+  det_line_a_[2] = line(pic, det_head_a2_, 3, kChA, 6);
+  // Arrow B: in / out along the axle (horizontal), under the axle.
+  det_arrow_b_[0] = {150, 250};
+  det_arrow_b_[1] = {390, 250};
+  det_head_b_[0] = {170, 238};
+  det_head_b_[1] = {150, 250};
+  det_head_b_[2] = {170, 262};
+  det_head_b2_[0] = {370, 238};
+  det_head_b2_[1] = {390, 250};
+  det_head_b2_[2] = {370, 262};
+  det_line_b_[0] = line(pic, det_arrow_b_, 2, kChB, 6);
+  det_line_b_[1] = line(pic, det_head_b_, 3, kChB, 6);
+  det_line_b_[2] = line(pic, det_head_b2_, 3, kChB, 6);
+
+  det_text_ = text(o, "", F20, kText, 460, 64);
+  lv_obj_set_width(det_text_, 496);
+  lv_label_set_long_mode(det_text_, LV_LABEL_LONG_MODE_WRAP);
+  static const char *kAxN[3] = {"X", "Y", "Z"};
+  for (int k = 0; k < 3; k++) {
+    text(o, kAxN[k], F28, kText, 460, 200 + k * 50);
+    lv_obj_t *b = lv_bar_create(o);
+    lv_obj_set_pos(b, 500, 206 + k * 50);
+    lv_obj_set_size(b, 330, 26);
+    lv_bar_set_range(b, 0, 1000);
+    lv_obj_set_style_bg_color(b, col(kPanel2), 0);
+    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_radius(b, 4, LV_PART_INDICATOR);
+    det_bar_[k] = b;
+    det_val_[k] = text(o, "", F20, kText, 846, 206 + k * 50);
   }
-  det_ch_ = ch;
-  det_end_ms_ = lv_tick_get() + kDetectMs;
+  det_prog_ = lv_bar_create(o);
+  lv_obj_set_pos(det_prog_, 460, 360);
+  lv_obj_set_size(det_prog_, 496, 10);
+  lv_bar_set_range(det_prog_, 0, 1000);
+  lv_obj_set_style_bg_color(det_prog_, col(kPanel2), 0);
+  lv_obj_set_style_bg_color(det_prog_, col(kAmber), LV_PART_INDICATOR);
+
+  det_btn_l_ = button_(o, "Close", F20, [this]() {
+    det_running_ = false;
+    det_ch_ = -1;
+    set_visible(det_overlay_, false);
+  }, col(kPanel2));
+  lv_obj_set_pos(det_btn_l_, 20, 402);
+  lv_obj_set_size(det_btn_l_, 200, 52);
+  det_btn_r_ = button_(o, "START", F20, [this]() { detect_next_(); }, col(kGreen));
+  lv_obj_set_pos(det_btn_r_, 756, 402);
+  lv_obj_set_size(det_btn_r_, 200, 52);
+  set_visible(det_overlay_, false);
+}
+
+void BalancerUi::open_detect_() {
+  det_ch_ = 0;
+  det_running_ = false;
+  det_done_ = false;
+  det_result_.clear();
   for (float &p : det_peak_) p = 0;
-  toast_(fmt("Rock or shake sensor %c's mount the way it should measure, for 3 seconds...", 'A' + ch));
+  set_visible(det_overlay_, true);
+  update_detect_();
+}
+
+// The right-hand button: START a sensor, or move on after a result.
+void BalancerUi::detect_next_() {
+  if (det_running_) return;
+  if (det_done_) {
+    const bool two = model_->live().raw_n[1] > 0 || model_->simulate();
+    if (det_ch_ == 0 && two) {
+      det_ch_ = 1;
+      det_done_ = false;
+      det_result_.clear();
+      for (float &p : det_peak_) p = 0;
+    } else {
+      det_ch_ = -1;
+      set_visible(det_overlay_, false);
+      return;
+    }
+  } else {
+    det_running_ = true;
+    det_end_ms_ = lv_tick_get() + kDetectMs;
+    for (float &p : det_peak_) p = 0;
+  }
+  update_detect_();
+}
+
+void BalancerUi::finish_detect_() {
+  const int c = det_ch_;
+  static const char kAx[] = "XYZ";
+  det_running_ = false;
+  det_done_ = true;
+  int best = 0;
+  for (int k = 1; k < 3; k++)
+    if (det_peak_[k] > det_peak_[best]) best = k;
+  float second = 0;
+  for (int k = 0; k < 3; k++)
+    if (k != best) second = std::max(second, det_peak_[k]);
+  if (det_peak_[best] < 0.005f) {
+    det_result_ = fmt("Sensor %c hardly moved (%.1f mg). Push harder and try again.", 'A' + c, det_peak_[best] * 1000);
+    det_done_ = false;  // same sensor again
+  } else if (det_peak_[best] < 1.5f * second) {
+    det_result_ = fmt("No clear axis for sensor %c: %c and %c moved about the same. The board is probably at an "
+                      "angle to the push. Try again pushing straight, or pick by hand.",
+                      'A' + c, kAx[best], kAx[det_peak_[0] == second ? 0 : (det_peak_[1] == second ? 1 : 2)]);
+    det_done_ = false;
+  } else {
+    UiSettings &st = model_->settings();
+    const bool changed = st.axis[c] != best;
+    st.axis[c] = best;
+    model_->apply_settings(false);
+    det_result_ = fmt("Sensor %c: %c axis (%.0f mg, next best %.0f mg).%s", 'A' + c, kAx[best],
+                      det_peak_[best] * 1000, second * 1000,
+                      changed ? " Changed: start the balancing job again. SAVE keeps it." : " Already set.");
+  }
+}
+
+void BalancerUi::update_detect_() {
+  if (det_overlay_ == nullptr || det_ch_ < 0) return;
+  const int c = det_ch_;
+  const LiveData &lv = model_->live();
+  const uint32_t ca = c == 0 ? kChA : kChB;
+  lv_label_set_text(det_title_, fmt("Find the axis of sensor %c", 'A' + c).c_str());
+  for (int i = 0; i < 3; i++) {
+    lv_obj_set_style_line_color(det_line_a_[i], col(c == 0 ? kChA : 0x4b5563), 0);
+    lv_obj_set_style_line_color(det_line_b_[i], col(c == 1 ? kChB : 0x4b5563), 0);
+  }
+  if (det_running_) {
+    for (int k = 0; k < 3; k++) det_peak_[k] = std::max(det_peak_[k], lv.axis_rms[c][k]);
+    const int32_t left = static_cast<int32_t>(det_end_ms_ - lv_tick_get());
+    lv_bar_set_value(det_prog_, std::max<int32_t>(0, 1000 - left * 1000 / static_cast<int32_t>(kDetectMs)), LV_ANIM_OFF);
+    if (left <= 0) finish_detect_();
+  } else {
+    lv_bar_set_value(det_prog_, det_done_ ? 1000 : 0, LV_ANIM_OFF);
+  }
+  std::string msg;
+  if (det_running_) {
+    msg = c == 0 ? "Keep pushing the tyre FORWARD and BACK (the way the car drives), about once a second..."
+                 : "Keep pushing the tyre IN and OUT along the axle, about once a second...";
+  } else if (!det_result_.empty() && (det_done_ || det_peak_[0] + det_peak_[1] + det_peak_[2] > 0)) {
+    msg = det_result_;
+  } else {
+    msg = c == 0 ? "Sensor A measures FORWARD / BACK, the way the car drives (blue arrow).\n\nTap START, then push "
+                   "the tyre forward and back by hand, about once a second, for 4 seconds."
+                 : "Sensor B measures IN / OUT along the axle (orange arrow).\n\nTap START, then push the tyre "
+                   "in and out along the axle, about once a second, for 4 seconds.";
+  }
+  lv_label_set_text(det_text_, msg.c_str());
+  // Live bars: this sensor's shake on each axis now, scaled to the largest.
+  const float *r = lv.axis_rms[c];
+  const float mx = std::max(0.002f, std::max(r[0], std::max(r[1], r[2])));
+  const int cur = model_->settings().axis[c];
+  for (int k = 0; k < 3; k++) {
+    lv_bar_set_value(det_bar_[k], static_cast<int32_t>(r[k] / mx * 1000), LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(det_bar_[k], col(k == cur ? ca : kMuted), LV_PART_INDICATOR);
+    lv_label_set_text(det_val_[k], fmt("%.0f mg", r[k] * 1000).c_str());
+  }
+  const char *rl = det_running_ ? "..." : (det_done_ ? ((c == 0 && (lv.raw_n[1] > 0 || model_->simulate())) ? "Sensor B" : "Done") : "START");
+  lv_label_set_text(lv_obj_get_child(det_btn_r_, 0), rl);
 }
 
 void BalancerUi::update_settings_() {
@@ -934,41 +1113,13 @@ void BalancerUi::update_settings_() {
     for (int k = 0; k < 3; k++)
       lv_obj_set_style_bg_color(s_axis_btn_[c][k], col(st.axis[c] == k ? (c == 0 ? kChA : kChB) : kPanel2), 0);
     const float *m = lv.axis_mean[c], *r = lv.axis_rms[c];
-    std::string state = fmt("measuring %c", kAx[st.axis[c]]);
-    if (det_ch_ == c) state = "DETECTING: keep rocking...";
-    lv_label_set_text(s_axis_info_[c], fmt("gravity  X %+.2f  Y %+.2f  Z %+.2f g\n"
-                                           "shake    X %.1f  Y %.1f  Z %.1f mg rms\n%s",
-                                           m[0], m[1], m[2], r[0] * 1000, r[1] * 1000, r[2] * 1000, state.c_str())
+    lv_label_set_text(s_axis_info_[c], fmt("measuring %c", kAx[st.axis[c]]).c_str());
+    lv_label_set_text(s_axis_grav_[c], fmt("gravity  X %+.2f  Y %+.2f  Z %+.2f g\n"
+                                           "shake    X %.1f  Y %.1f  Z %.1f mg rms",
+                                           m[0], m[1], m[2], r[0] * 1000, r[1] * 1000, r[2] * 1000)
                                            .c_str());
   }
-  if (det_ch_ >= 0) {
-    const int c = det_ch_;
-    for (int k = 0; k < 3; k++) det_peak_[k] = std::max(det_peak_[k], lv.axis_rms[c][k]);
-    if (static_cast<int32_t>(lv_tick_get() - det_end_ms_) >= 0) {
-      det_ch_ = -1;
-      int best = 0;
-      for (int k = 1; k < 3; k++)
-        if (det_peak_[k] > det_peak_[best]) best = k;
-      float second = 0;
-      for (int k = 0; k < 3; k++)
-        if (k != best) second = std::max(second, det_peak_[k]);
-      if (det_peak_[best] < 0.005f) {
-        toast_(fmt("Sensor %c barely moved (%.1f mg). Rock it harder and tap DETECT again.", 'A' + c,
-                   det_peak_[best] * 1000));
-      } else if (det_peak_[best] < 1.5f * second) {
-        toast_(fmt("No clear axis for sensor %c (X %.0f, Y %.0f, Z %.0f mg). Rock it in one direction only, or "
-                   "pick X/Y/Z by hand.",
-                   'A' + c, det_peak_[0] * 1000, det_peak_[1] * 1000, det_peak_[2] * 1000));
-      } else {
-        UiSettings &sm = model_->settings();
-        const bool changed = sm.axis[c] != best;
-        sm.axis[c] = best;
-        model_->apply_settings(false);
-        toast_(fmt("Sensor %c: %c axis (%.0f mg, next %.0f mg).%s", 'A' + c, kAx[best], det_peak_[best] * 1000,
-                   second * 1000, changed ? " Start the job again; SAVE keeps it." : " Unchanged."));
-      }
-    }
-  }
+  update_detect_();
   if (s_net_ != nullptr) {
     const std::string net = model_->network_status();
     lv_label_set_text(s_net_, net.empty() ? "not available here" : net.c_str());
